@@ -74,7 +74,7 @@ async function getAuthUrl(): Promise<string> {
   return await msalApp.getAuthCodeUrl({
     scopes: SCOPES,
     redirectUri: REDIRECT_URI,
-    prompt: "consent", // Force consent screen to ensure all permissions granted
+    prompt: "select_account", // Let user pick account; admin consent covers permissions
   });
 }
 
