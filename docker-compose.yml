@@ -1,0 +1,18 @@
+services:
+  smart-checkins:
+    build: .
+    container_name: smart-checkins
+    restart: always
+    volumes:
+      - checkins-data:/app/data
+    environment:
+      - NODE_ENV=production
+      - DATABASE_PATH=/app/data/checkins.db
+    # All other env vars injected by Doppler:
+    #   doppler run -- docker compose up -d --build
+    # Or pass a .env file for testing:
+    #   docker compose --env-file .env up -d --build
+
+volumes:
+  checkins-data:
+    driver: local

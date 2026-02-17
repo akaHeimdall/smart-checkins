@@ -137,3 +137,9 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Smart Check-ins specific
+data/
+*.db
+*.db-wal
+*.db-shm

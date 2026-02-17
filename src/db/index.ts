@@ -1,0 +1,304 @@
+import Database from "better-sqlite3";
+import path from "path";
+import { getConfig } from "../config";
+import { createChildLogger } from "../logger";
+import type {
+  CheckinLogEntry,
+  Decision,
+  EmailTracking,
+  MemoryEntry,
+  PartnershipInfo,
+} from "../types";
+
+const log = createChildLogger("db");
+
+let _db: Database.Database | null = null;
+
+// ── Initialize database ───────────────────────────────────────────
+
+export function initDatabase(): Database.Database {
+  if (_db) return _db;
+
+  const config = getConfig();
+  const dbPath = path.resolve(config.DATABASE_PATH);
+  log.info({ dbPath }, "Initializing SQLite database");
+
+  _db = new Database(dbPath);
+
+  // Enable WAL mode for better concurrent read performance
+  _db.pragma("journal_mode = WAL");
+  _db.pragma("foreign_keys = ON");
+
+  runMigrations(_db);
+
+  log.info("Database initialized successfully");
+  return _db;
+}
+
+export function getDatabase(): Database.Database {
+  if (!_db) {
+    throw new Error("Database not initialized. Call initDatabase() first.");
+  }
+  return _db;
+}
+
+export function closeDatabase(): void {
+  if (_db) {
+    _db.close();
+    _db = null;
+    log.info("Database closed");
+  }
+}
+
+// ── Migrations ────────────────────────────────────────────────────
+
+function runMigrations(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS checkin_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+      decision TEXT NOT NULL CHECK (decision IN ('NONE', 'TEXT', 'CALL')),
+      urgency INTEGER NOT NULL DEFAULT 0,
+      summary TEXT NOT NULL DEFAULT '',
+      sources_available TEXT NOT NULL DEFAULT '[]'
+    );
+
+    CREATE TABLE IF NOT EXISTS partnerships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      domain TEXT NOT NULL UNIQUE,
+      company_name TEXT NOT NULL,
+      last_contact TEXT,
+      quote_amount REAL,
+      contact_count INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'active'
+    );
+
+    CREATE TABLE IF NOT EXISTS snoozed_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_type TEXT NOT NULL CHECK (source_type IN ('email', 'task', 'calendar')),
+      source_id TEXT NOT NULL,
+      snooze_until TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(source_type, source_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS memory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL UNIQUE,
+      value TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'general',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS call_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+      outcome TEXT NOT NULL DEFAULT 'unknown',
+      duration INTEGER,
+      summary TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS email_tracking (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL UNIQUE,
+      first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+      last_notified TEXT,
+      reply_detected INTEGER NOT NULL DEFAULT 0,
+      snooze_until TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_checkin_log_timestamp ON checkin_log(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_partnerships_domain ON partnerships(domain);
+    CREATE INDEX IF NOT EXISTS idx_snoozed_items_until ON snoozed_items(snooze_until);
+    CREATE INDEX IF NOT EXISTS idx_email_tracking_conv ON email_tracking(conversation_id);
+  `);
+
+  log.debug("Migrations complete");
+}
+
+// ── Check-in log queries ──────────────────────────────────────────
+
+export function logCheckin(
+  decision: Decision,
+  urgency: number,
+  summary: string,
+  sourcesAvailable: string[]
+): void {
+  const db = getDatabase();
+  db.prepare(
+    `INSERT INTO checkin_log (decision, urgency, summary, sources_available)
+     VALUES (?, ?, ?, ?)`
+  ).run(decision, urgency, summary, JSON.stringify(sourcesAvailable));
+}
+
+export function getRecentCheckins(limit = 5): CheckinLogEntry[] {
+  const db = getDatabase();
+  const rows = db
+    .prepare(
+      `SELECT id, timestamp, decision, urgency, summary, sources_available as sourcesAvailable
+       FROM checkin_log ORDER BY timestamp DESC LIMIT ?`
+    )
+    .all(limit) as CheckinLogEntry[];
+  return rows;
+}
+
+export function getLastCheckinTimestamp(): string | null {
+  const db = getDatabase();
+  const row = db
+    .prepare(`SELECT timestamp FROM checkin_log ORDER BY timestamp DESC LIMIT 1`)
+    .get() as { timestamp: string } | undefined;
+  return row?.timestamp ?? null;
+}
+
+// ── Partnership queries ───────────────────────────────────────────
+
+export function getPartnershipByDomain(domain: string): PartnershipInfo | null {
+  const db = getDatabase();
+  const row = db
+    .prepare(
+      `SELECT id, domain, company_name as companyName, last_contact as lastContact,
+              quote_amount as quoteAmount, contact_count as contactCount, status
+       FROM partnerships WHERE domain = ?`
+    )
+    .get(domain) as PartnershipInfo | undefined;
+  return row ?? null;
+}
+
+export function upsertPartnership(
+  domain: string,
+  companyName: string,
+  quoteAmount?: number
+): void {
+  const db = getDatabase();
+  db.prepare(
+    `INSERT INTO partnerships (domain, company_name, last_contact, quote_amount, contact_count)
+     VALUES (?, ?, datetime('now'), ?, 1)
+     ON CONFLICT(domain) DO UPDATE SET
+       last_contact = datetime('now'),
+       contact_count = contact_count + 1,
+       quote_amount = COALESCE(?, quote_amount)`
+  ).run(domain, companyName, quoteAmount ?? null, quoteAmount ?? null);
+}
+
+export function getAllPartnerships(): PartnershipInfo[] {
+  const db = getDatabase();
+  return db
+    .prepare(
+      `SELECT id, domain, company_name as companyName, last_contact as lastContact,
+              quote_amount as quoteAmount, contact_count as contactCount, status
+       FROM partnerships WHERE status = 'active' ORDER BY last_contact DESC`
+    )
+    .all() as PartnershipInfo[];
+}
+
+// ── Snooze queries ────────────────────────────────────────────────
+
+export function snoozeItem(
+  sourceType: "email" | "task" | "calendar",
+  sourceId: string,
+  snoozeUntil: string
+): void {
+  const db = getDatabase();
+  db.prepare(
+    `INSERT INTO snoozed_items (source_type, source_id, snooze_until)
+     VALUES (?, ?, ?)
+     ON CONFLICT(source_type, source_id) DO UPDATE SET snooze_until = ?`
+  ).run(sourceType, sourceId, snoozeUntil, snoozeUntil);
+}
+
+export function isSnoozed(sourceType: string, sourceId: string): boolean {
+  const db = getDatabase();
+  const row = db
+    .prepare(
+      `SELECT id FROM snoozed_items
+       WHERE source_type = ? AND source_id = ? AND snooze_until > datetime('now')`
+    )
+    .get(sourceType, sourceId);
+  return !!row;
+}
+
+export function cleanExpiredSnoozes(): number {
+  const db = getDatabase();
+  const result = db
+    .prepare(`DELETE FROM snoozed_items WHERE snooze_until <= datetime('now')`)
+    .run();
+  return result.changes;
+}
+
+// ── Memory queries ────────────────────────────────────────────────
+
+export function getMemory(key: string): string | null {
+  const db = getDatabase();
+  const row = db
+    .prepare(`SELECT value FROM memory WHERE key = ?`)
+    .get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setMemory(key: string, value: string, category = "general"): void {
+  const db = getDatabase();
+  db.prepare(
+    `INSERT INTO memory (key, value, category, updated_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value = ?, category = ?, updated_at = datetime('now')`
+  ).run(key, value, category, value, category);
+}
+
+export function getAllMemory(): MemoryEntry[] {
+  const db = getDatabase();
+  return db
+    .prepare(
+      `SELECT id, key, value, category, updated_at as updatedAt
+       FROM memory ORDER BY updated_at DESC`
+    )
+    .all() as MemoryEntry[];
+}
+
+// ── Email tracking queries ────────────────────────────────────────
+
+export function trackEmail(conversationId: string): void {
+  const db = getDatabase();
+  db.prepare(
+    `INSERT OR IGNORE INTO email_tracking (conversation_id) VALUES (?)`
+  ).run(conversationId);
+}
+
+export function markEmailNotified(conversationId: string): void {
+  const db = getDatabase();
+  db.prepare(
+    `UPDATE email_tracking SET last_notified = datetime('now') WHERE conversation_id = ?`
+  ).run(conversationId);
+}
+
+export function markEmailReplied(conversationId: string): void {
+  const db = getDatabase();
+  db.prepare(
+    `UPDATE email_tracking SET reply_detected = 1 WHERE conversation_id = ?`
+  ).run(conversationId);
+}
+
+export function getEmailTracking(conversationId: string): EmailTracking | null {
+  const db = getDatabase();
+  const row = db
+    .prepare(
+      `SELECT id, conversation_id as conversationId, first_seen as firstSeen,
+              last_notified as lastNotified, reply_detected as replyDetected,
+              snooze_until as snoozeUntil
+       FROM email_tracking WHERE conversation_id = ?`
+    )
+    .get(conversationId) as EmailTracking | undefined;
+  return row ?? null;
+}
+
+// ── Call log queries ──────────────────────────────────────────────
+
+export function getCallsToday(): number {
+  const db = getDatabase();
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) as count FROM call_log
+       WHERE date(timestamp) = date('now')`
+    )
+    .get() as { count: number };
+  return row.count;
+}
