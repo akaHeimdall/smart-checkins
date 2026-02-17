@@ -1,3 +1,4 @@
+import "dotenv/config"; // Load .env file before anything else
 import { loadConfig } from "./config";
 import { initDatabase, closeDatabase } from "./db";
 import { initBot, startBot, stopBot, sendNotification } from "./bot";

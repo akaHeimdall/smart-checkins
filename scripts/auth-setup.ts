@@ -1,3 +1,5 @@
+import "dotenv/config"; // Load .env file
+
 /**
  * One-time auth setup for Smart Check-ins (Delegated Flow)
  *

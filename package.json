@@ -10,7 +10,15 @@
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": ["telegram", "bot", "outlook", "microsoft-graph", "claude", "ai", "productivity"],
+  "keywords": [
+    "telegram",
+    "bot",
+    "outlook",
+    "microsoft-graph",
+    "claude",
+    "ai",
+    "productivity"
+  ],
   "author": "Saeed Richardson",
   "license": "UNLICENSED",
   "private": true,
@@ -22,6 +30,7 @@
     "@azure/msal-node": "^2.16.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "better-sqlite3": "^11.7.0",
+    "dotenv": "^17.3.1",
     "grammy": "^1.31.0",
     "node-cron": "^3.0.3",
     "pino": "^9.6.0",
