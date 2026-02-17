@@ -86,6 +86,12 @@ export type AuthMode = "client_credentials" | "delegated";
 
 export function getAuthMode(): AuthMode {
   const config = getConfig();
+  // If a refresh token is present, we're using delegated flow
+  // (even though we also have a client secret for the confidential app)
+  if (config.AZURE_REFRESH_TOKEN) {
+    return "delegated";
+  }
+  // Client secret without refresh token = app-only client credentials
   if (config.AZURE_CLIENT_SECRET) {
     return "client_credentials";
   }

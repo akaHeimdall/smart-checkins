@@ -1,6 +1,5 @@
 import {
   ConfidentialClientApplication,
-  PublicClientApplication,
   type AuthenticationResult,
   type Configuration,
 } from "@azure/msal-node";
@@ -19,7 +18,6 @@ const DELEGATED_SCOPES = [
 ];
 
 let _confidentialApp: ConfidentialClientApplication | null = null;
-let _publicApp: PublicClientApplication | null = null;
 let _cachedToken: string | null = null;
 let _tokenExpiry: Date | null = null;
 
@@ -85,31 +83,36 @@ async function getClientCredentialsToken(): Promise<string> {
   }
 }
 
-// ── Delegated Flow (refresh token) ────────────────────────────────
+// ── Delegated Flow (refresh token with client secret) ─────────────
+// Uses ConfidentialClientApplication because the Entra app has a
+// client secret configured alongside delegated permissions.
+
+let _delegatedApp: ConfidentialClientApplication | null = null;
 
 async function getDelegatedToken(): Promise<string> {
   const config = getConfig();
 
-  if (!_publicApp) {
+  if (!_delegatedApp) {
     const msalConfig: Configuration = {
       auth: {
         clientId: config.AZURE_CLIENT_ID,
         authority: `https://login.microsoftonline.com/${config.AZURE_TENANT_ID}`,
+        clientSecret: config.AZURE_CLIENT_SECRET,
       },
     };
-    _publicApp = new PublicClientApplication(msalConfig);
-    log.info("Initialized MSAL PublicClientApplication (delegated flow)");
+    _delegatedApp = new ConfidentialClientApplication(msalConfig);
+    log.info("Initialized MSAL ConfidentialClientApplication (delegated flow with client secret)");
   }
 
   if (!config.AZURE_REFRESH_TOKEN) {
     throw new Error(
-      "AZURE_REFRESH_TOKEN is required for delegated flow. Run the initial auth setup first."
+      "AZURE_REFRESH_TOKEN is required for delegated flow. Run: npx tsx scripts/auth-setup.ts"
     );
   }
 
   try {
     const result: AuthenticationResult | null =
-      await _publicApp.acquireTokenByRefreshToken({
+      await _delegatedApp.acquireTokenByRefreshToken({
         refreshToken: config.AZURE_REFRESH_TOKEN,
         scopes: DELEGATED_SCOPES,
       });
@@ -123,14 +126,14 @@ async function getDelegatedToken(): Promise<string> {
 
     log.debug(
       { expiresOn: result.expiresOn?.toISOString() },
-      "Acquired token via refresh token"
+      "Acquired token via delegated refresh token"
     );
 
     return result.accessToken;
   } catch (error) {
     log.error(
       { error },
-      "Failed to acquire token via refresh token. Token may have expired — re-authentication required."
+      "Failed to acquire token via refresh token. Token may have expired — re-run: npx tsx scripts/auth-setup.ts"
     );
     throw error;
   }
@@ -140,7 +143,7 @@ async function getDelegatedToken(): Promise<string> {
 
 export function resetAuth(): void {
   _confidentialApp = null;
-  _publicApp = null;
+  _delegatedApp = null;
   _cachedToken = null;
   _tokenExpiry = null;
   log.info("Auth state reset");
