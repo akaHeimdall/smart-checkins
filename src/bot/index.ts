@@ -2,6 +2,7 @@ import { Bot, InlineKeyboard, type Context } from "grammy";
 import { getConfig } from "../config";
 import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified } from "../db";
 import { formatStatusMessage, formatDecisionNotification } from "./messages";
+import { shortenId, resolveId } from "./callback-store";
 import { createChildLogger } from "../logger";
 import type { DecisionResult } from "../types";
 import fs from "fs";
@@ -113,22 +114,28 @@ export function initBot(): Bot {
           _onForceCheck();
         }
 
-      } else if (data.startsWith("snooze_email:")) {
-        const conversationId = data.replace("snooze_email:", "");
+      } else if (data.startsWith("se:")) {
+        // se = snooze email (shortened prefix)
+        const shortId = data.replace("se:", "");
+        const conversationId = resolveId(shortId);
         const snoozeUntil = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
         snoozeItem("email", conversationId, snoozeUntil);
         await ctx.answerCallbackQuery({ text: "⏰ Email snoozed for 2 hours" });
         log.info({ conversationId, snoozeUntil }, "Email snoozed");
 
-      } else if (data.startsWith("snooze_task:")) {
-        const taskId = data.replace("snooze_task:", "");
+      } else if (data.startsWith("st:")) {
+        // st = snooze task (shortened prefix)
+        const shortId = data.replace("st:", "");
+        const taskId = resolveId(shortId);
         const snoozeUntil = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
         snoozeItem("task", taskId, snoozeUntil);
         await ctx.answerCallbackQuery({ text: "⏰ Task snoozed for 2 hours" });
         log.info({ taskId, snoozeUntil }, "Task snoozed");
 
-      } else if (data.startsWith("mark_read:")) {
-        const emailId = data.replace("mark_read:", "");
+      } else if (data.startsWith("mr:")) {
+        // mr = mark read (shortened prefix)
+        const shortId = data.replace("mr:", "");
+        const emailId = resolveId(shortId);
         markEmailNotified(emailId);
         await ctx.answerCallbackQuery({ text: "✅ Marked as handled" });
         log.info({ emailId }, "Email marked as handled");
@@ -169,6 +176,23 @@ export async function sendNotification(text: string): Promise<void> {
   }
 }
 
+// ── Send a plain text notification (no Markdown parsing) ─────────
+
+export async function sendPlainNotification(text: string): Promise<void> {
+  if (_isPaused) return;
+
+  const config = getConfig();
+  const bot = getBot();
+
+  try {
+    await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, text);
+    log.debug("Plain notification sent");
+  } catch (error) {
+    log.error({ error }, "Failed to send plain Telegram notification");
+    throw error;
+  }
+}
+
 // ── Send a decision notification with inline buttons ─────────────
 
 export async function sendDecisionNotification(
@@ -184,11 +208,12 @@ export async function sendDecisionNotification(
 
   const text = formatDecisionNotification(decision);
 
-  // Build inline keyboard from action buttons
+  // Build inline keyboard — shorten IDs to fit Telegram's 64-byte limit
   const keyboard = new InlineKeyboard();
   for (const button of decision.actionButtons) {
+    const shortData = shortenCallbackData(button);
     const label = getButtonLabel(button);
-    keyboard.text(label, button).row();
+    keyboard.text(label, shortData).row();
   }
 
   try {
@@ -265,4 +290,30 @@ function getButtonLabel(action: string): string {
   if (action.startsWith("snooze_task:")) return "⏰ Snooze Task (2hr)";
   if (action.startsWith("mark_read:")) return "✅ Mark Handled";
   return action;
+}
+
+/**
+ * Shorten callback data to fit Telegram's 64-byte limit.
+ * Maps long prefixes to 2-char codes and hashes long IDs.
+ */
+function shortenCallbackData(action: string): string {
+  // Short actions that already fit
+  if (action === "snooze_all" || action === "force_check") return action;
+
+  // Map long prefixes to 2-char codes and hash the ID
+  if (action.startsWith("snooze_email:")) {
+    const id = action.replace("snooze_email:", "");
+    return `se:${shortenId(id)}`;
+  }
+  if (action.startsWith("snooze_task:")) {
+    const id = action.replace("snooze_task:", "");
+    return `st:${shortenId(id)}`;
+  }
+  if (action.startsWith("mark_read:")) {
+    const id = action.replace("mark_read:", "");
+    return `mr:${shortenId(id)}`;
+  }
+
+  // Fallback: truncate to 64 bytes
+  return action.slice(0, 64);
 }

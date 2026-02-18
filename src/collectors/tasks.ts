@@ -1,4 +1,4 @@
-import { graphGet } from "../graph";
+import { getGraphClient, getUserPath } from "../graph";
 import { createChildLogger } from "../logger";
 import type { TodoTask, TodoList } from "../types";
 
@@ -29,9 +29,13 @@ export async function fetchTodoLists(): Promise<TodoList[]> {
   if (_todoLists) return _todoLists;
 
   try {
-    const response = await graphGet<GraphTaskListResponse>("/todo/lists", {
-      $select: "id,displayName",
-    });
+    // Use the Graph client directly — the To Do API is sensitive to
+    // query parameter encoding, so we avoid the graphGet wrapper
+    const client = getGraphClient();
+    const userPath = getUserPath();
+    const response = await client
+      .api(`${userPath}/todo/lists`)
+      .get() as GraphTaskListResponse;
 
     _todoLists = response.value.map((list) => ({
       id: list.id,
@@ -54,16 +58,16 @@ export async function fetchTodoLists(): Promise<TodoList[]> {
 export async function fetchOpenTasks(): Promise<TodoTask[]> {
   const lists = await fetchTodoLists();
   const allTasks: TodoTask[] = [];
+  const client = getGraphClient();
+  const userPath = getUserPath();
 
   for (const list of lists) {
     try {
-      const response = await graphGet<GraphTaskResponse>(
-        `/todo/lists/${list.id}/tasks`,
-        {
-          $filter: "status ne 'completed'",
-          $select: "id,title,dueDateTime,importance,status",
-        }
-      );
+      const response = await client
+        .api(`${userPath}/todo/lists/${list.id}/tasks`)
+        .filter("status ne 'completed'")
+        .select("id,title,dueDateTime,importance,status")
+        .get() as GraphTaskResponse;
 
       const tasks: TodoTask[] = response.value.map((task) => ({
         id: task.id,

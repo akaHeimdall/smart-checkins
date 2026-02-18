@@ -4,7 +4,7 @@ import { collectContext } from "./collectors";
 import { enrichEmails } from "./enrichment";
 import { checkGating } from "./gating";
 import { makeDecision } from "./engine";
-import { sendDecisionNotification, sendNotification, isPaused, setOnForceCheck } from "./bot";
+import { sendDecisionNotification, sendPlainNotification, isPaused, setOnForceCheck } from "./bot";
 import { logCheckin, cleanExpiredSnoozes } from "./db";
 import { createChildLogger } from "./logger";
 import type { CycleResult } from "./types";
@@ -115,8 +115,10 @@ export async function runCycle(): Promise<CycleResult> {
     log.error({ cycleId, error }, "Cycle failed");
 
     try {
-      await sendNotification(
-        `⚠️ *Smart Check-in Error*\n\nCycle ${cycleId} failed: ${(error as Error).message}`
+      // Send error as plain text — error messages often contain
+      // special chars that break Markdown parsing
+      await sendPlainNotification(
+        `⚠️ Smart Check-in Error\n\nCycle ${cycleId} failed: ${(error as Error).message}`
       );
     } catch {
       log.error("Failed to send error notification to Telegram");
