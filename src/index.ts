@@ -15,7 +15,7 @@ async function main(): Promise<void> {
     loadConfig();
     log.info("Configuration loaded");
   } catch (error) {
-    log.fatal({ error }, "Failed to load configuration");
+    log.fatal({ errorMessage: (error as Error).message }, "Failed to load configuration");
     process.exit(1);
   }
 
