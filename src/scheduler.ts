@@ -4,7 +4,7 @@ import { collectContext } from "./collectors";
 import { enrichEmails } from "./enrichment";
 import { checkGating } from "./gating";
 import { makeDecision } from "./engine";
-import { sendRawSummary, sendNotification, isPaused, setOnForceCheck } from "./bot";
+import { sendDecisionNotification, sendNotification, isPaused, setOnForceCheck } from "./bot";
 import { logCheckin, cleanExpiredSnoozes } from "./db";
 import { createChildLogger } from "./logger";
 import type { CycleResult } from "./types";
@@ -70,17 +70,13 @@ export async function runCycle(): Promise<CycleResult> {
       log.debug({ cleaned }, "Cleaned expired snoozes");
     }
 
-    // Stage 4: Decision (Phase 1 = placeholder, Phase 2 = Claude)
+    // Stage 4: Decision (Claude AI)
     const decision = await makeDecision(context);
 
-    // Stage 5: Act
+    // Stage 5: Act based on decision
     if (decision.decision === "TEXT" || decision.decision === "CALL") {
-      await sendNotification(decision.summary);
+      await sendDecisionNotification(decision);
     }
-
-    // For Phase 1: always send raw summary for testing
-    // Remove this once Claude decision engine is active in Phase 2
-    await sendRawSummary(context);
 
     // Log the check-in
     logCheckin(
@@ -99,8 +95,8 @@ export async function runCycle(): Promise<CycleResult> {
       decision,
       actionTaken:
         decision.decision === "NONE"
-          ? "No action (Phase 1: sent raw summary for testing)"
-          : `Sent ${decision.decision} notification`,
+          ? "No action needed"
+          : `Sent ${decision.decision} notification (urgency ${decision.urgency})`,
     };
 
     _lastCycleResult = result;

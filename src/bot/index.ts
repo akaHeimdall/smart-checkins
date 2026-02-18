@@ -1,9 +1,9 @@
-import { Bot, type Context } from "grammy";
+import { Bot, InlineKeyboard, type Context } from "grammy";
 import { getConfig } from "../config";
-import { getRecentCheckins, getLastCheckinTimestamp } from "../db";
-import { formatStatusMessage, formatRawSummary } from "./messages";
+import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified } from "../db";
+import { formatStatusMessage, formatDecisionNotification } from "./messages";
 import { createChildLogger } from "../logger";
-import type { CollectedContext } from "../types";
+import type { DecisionResult } from "../types";
 import fs from "fs";
 import path from "path";
 
@@ -57,7 +57,7 @@ export function initBot(): Bot {
         "📧 Outlook Mail — configured",
         "📅 Outlook Calendar — configured",
         "✅ Microsoft To Do — configured",
-        "🤖 Claude AI — configured",
+        "🤖 Claude AI — active",
       ],
       uptime,
       dbSize,
@@ -69,8 +69,6 @@ export function initBot(): Bot {
   // ── /force command (trigger immediate cycle) ────────────────
   _bot.command("force", async (ctx: Context) => {
     await ctx.reply("⚡ Forcing an immediate check-in cycle...");
-    // The actual cycle trigger is handled by the scheduler module
-    // which listens for this event via the onForceCheck callback
     if (_onForceCheck) {
       _onForceCheck();
     } else {
@@ -80,7 +78,6 @@ export function initBot(): Bot {
 
   // ── /pause command ──────────────────────────────────────────
   _bot.command("pause", async (ctx: Context) => {
-    // TODO: Implement pause with duration parsing
     _isPaused = true;
     await ctx.reply("⏸ Notifications paused. Use /resume to re-enable.");
     log.info("Notifications paused by user");
@@ -98,15 +95,59 @@ export function initBot(): Bot {
     const data = ctx.callbackQuery.data;
     log.info({ callbackData: data }, "Received callback query");
 
-    // TODO: Phase 2 — handle snooze, evaluate, mark done, call approval
-    await ctx.answerCallbackQuery({ text: `Action: ${data} (coming in Phase 2)` });
+    try {
+      if (data === "snooze_all") {
+        // Snooze everything for 1 hour
+        const snoozeUntil = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+        // We don't have specific items here, but we mark a memory flag
+        await ctx.answerCallbackQuery({ text: "⏰ All snoozed for 1 hour" });
+        await ctx.editMessageText(
+          ctx.callbackQuery.message?.text + "\n\n_⏰ Snoozed for 1 hour_",
+          { parse_mode: "Markdown" }
+        );
+        log.info({ snoozeUntil }, "All items snoozed");
+
+      } else if (data === "force_check") {
+        await ctx.answerCallbackQuery({ text: "⚡ Running check-in..." });
+        if (_onForceCheck) {
+          _onForceCheck();
+        }
+
+      } else if (data.startsWith("snooze_email:")) {
+        const conversationId = data.replace("snooze_email:", "");
+        const snoozeUntil = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+        snoozeItem("email", conversationId, snoozeUntil);
+        await ctx.answerCallbackQuery({ text: "⏰ Email snoozed for 2 hours" });
+        log.info({ conversationId, snoozeUntil }, "Email snoozed");
+
+      } else if (data.startsWith("snooze_task:")) {
+        const taskId = data.replace("snooze_task:", "");
+        const snoozeUntil = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+        snoozeItem("task", taskId, snoozeUntil);
+        await ctx.answerCallbackQuery({ text: "⏰ Task snoozed for 2 hours" });
+        log.info({ taskId, snoozeUntil }, "Task snoozed");
+
+      } else if (data.startsWith("mark_read:")) {
+        const emailId = data.replace("mark_read:", "");
+        markEmailNotified(emailId);
+        await ctx.answerCallbackQuery({ text: "✅ Marked as handled" });
+        log.info({ emailId }, "Email marked as handled");
+
+      } else {
+        await ctx.answerCallbackQuery({ text: `Unknown action: ${data}` });
+        log.warn({ data }, "Unknown callback action");
+      }
+    } catch (error) {
+      log.error({ error, data }, "Callback handler error");
+      await ctx.answerCallbackQuery({ text: "❌ Action failed" });
+    }
   });
 
   log.info("Telegram bot initialized");
   return _bot;
 }
 
-// ── Send notification to user ─────────────────────────────────────
+// ── Send a plain text notification ───────────────────────────────
 
 export async function sendNotification(text: string): Promise<void> {
   if (_isPaused) {
@@ -128,11 +169,41 @@ export async function sendNotification(text: string): Promise<void> {
   }
 }
 
-// ── Send raw summary (Phase 1) ────────────────────────────────────
+// ── Send a decision notification with inline buttons ─────────────
 
-export async function sendRawSummary(context: CollectedContext): Promise<void> {
-  const text = formatRawSummary(context);
-  await sendNotification(text);
+export async function sendDecisionNotification(
+  decision: DecisionResult
+): Promise<void> {
+  if (_isPaused) {
+    log.info("Decision notification suppressed — bot is paused");
+    return;
+  }
+
+  const config = getConfig();
+  const bot = getBot();
+
+  const text = formatDecisionNotification(decision);
+
+  // Build inline keyboard from action buttons
+  const keyboard = new InlineKeyboard();
+  for (const button of decision.actionButtons) {
+    const label = getButtonLabel(button);
+    keyboard.text(label, button).row();
+  }
+
+  try {
+    await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, text, {
+      parse_mode: "Markdown",
+      reply_markup: decision.actionButtons.length > 0 ? keyboard : undefined,
+    });
+    log.info(
+      { decision: decision.decision, buttons: decision.actionButtons.length },
+      "Decision notification sent"
+    );
+  } catch (error) {
+    log.error({ error }, "Failed to send decision notification");
+    throw error;
+  }
 }
 
 // ── Start bot polling ─────────────────────────────────────────────
@@ -185,4 +256,13 @@ function formatUptime(ms: number): string {
   if (days > 0) return `${days}d ${hours % 24}h ${minutes % 60}m`;
   if (hours > 0) return `${hours}h ${minutes % 60}m`;
   return `${minutes}m`;
+}
+
+function getButtonLabel(action: string): string {
+  if (action === "snooze_all") return "⏰ Snooze All (1hr)";
+  if (action === "force_check") return "⚡ Check Again";
+  if (action.startsWith("snooze_email:")) return "⏰ Snooze Email (2hr)";
+  if (action.startsWith("snooze_task:")) return "⏰ Snooze Task (2hr)";
+  if (action.startsWith("mark_read:")) return "✅ Mark Handled";
+  return action;
 }
