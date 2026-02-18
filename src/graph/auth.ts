@@ -11,7 +11,6 @@ const log = createChildLogger("graph-auth");
 const GRAPH_SCOPES = ["https://graph.microsoft.com/.default"];
 const DELEGATED_SCOPES = [
   "Mail.Read",
-  "Mail.ReadWrite",
   "Calendars.Read",
   "Tasks.Read",
   "User.Read",

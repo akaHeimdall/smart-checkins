@@ -38,12 +38,10 @@ const PORT = 3847;
 
 const SCOPES = [
   "offline_access", // Required to get a refresh token
-  "Mail.Read",
-  "Mail.ReadWrite",
-  "Calendars.Read",
-  "Tasks.Read",
-  "Tasks.ReadWrite",
-  "User.Read",
+  "Mail.Read", // Read inbox & sent folder (no write/send needed)
+  "Calendars.Read", // Read calendar events
+  "Tasks.Read", // Read To Do tasks (upgrade to Tasks.ReadWrite if Phase 2 needs task completion)
+  "User.Read", // Basic profile info
 ];
 
 // ── Validate ──────────────────────────────────────────────────────
