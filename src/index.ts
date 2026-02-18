@@ -52,9 +52,9 @@ async function main(): Promise<void> {
     log.warn({ error }, "Failed to send startup notification (bot may not be fully connected yet)");
   }
 
-  // 6. Run initial cycle immediately
+  // 6. Run initial cycle immediately (bypass gating — always check on startup)
   log.info("Running initial check-in cycle...");
-  await runCycle();
+  await runCycle({ skipGating: true });
 
   log.info("Smart Check-ins is running. Press Ctrl+C to stop.");
 }

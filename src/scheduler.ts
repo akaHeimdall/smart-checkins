@@ -17,7 +17,7 @@ let _isRunning = false;
 
 // ── Run a single check-in cycle ───────────────────────────────────
 
-export async function runCycle(): Promise<CycleResult> {
+export async function runCycle(options?: { skipGating?: boolean }): Promise<CycleResult> {
   if (_isRunning) {
     log.warn("Cycle already in progress — skipping");
     return {
@@ -46,8 +46,10 @@ export async function runCycle(): Promise<CycleResult> {
       };
     }
 
-    // Stage 3: Gating check
-    const gatingResult = checkGating();
+    // Stage 3: Gating check (skipped for startup and /force)
+    const gatingResult = options?.skipGating
+      ? { status: "PROCEED" as const }
+      : checkGating();
     if (gatingResult.status === "BLOCKED") {
       log.info({ cycleId, reason: gatingResult.reason }, "Cycle blocked by gating");
       return {
@@ -148,10 +150,10 @@ export function startScheduler(): void {
     await runCycle();
   });
 
-  // Wire up the /force command
+  // Wire up the /force command — bypasses gating
   setOnForceCheck(() => {
     log.info("Force check-in triggered via Telegram");
-    runCycle().catch((err) =>
+    runCycle({ skipGating: true }).catch((err) =>
       log.error({ error: err }, "Force cycle failed")
     );
   });
