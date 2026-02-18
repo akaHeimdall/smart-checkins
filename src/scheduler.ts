@@ -4,7 +4,7 @@ import { collectContext } from "./collectors";
 import { enrichEmails } from "./enrichment";
 import { checkGating } from "./gating";
 import { makeDecision } from "./engine";
-import { sendDecisionNotification, sendPlainNotification, isPaused, setOnForceCheck } from "./bot";
+import { sendDecisionNotification, sendNoneNotification, sendPlainNotification, isPaused, setOnForceCheck } from "./bot";
 import { logCheckin, cleanExpiredSnoozes } from "./db";
 import { createChildLogger } from "./logger";
 import type { CycleResult } from "./types";
@@ -75,9 +75,12 @@ export async function runCycle(options?: { skipGating?: boolean }): Promise<Cycl
     // Stage 4: Decision (Claude AI)
     const decision = await makeDecision(context);
 
-    // Stage 5: Act based on decision
+    // Stage 5: Act — send all decisions to Telegram
     if (decision.decision === "TEXT" || decision.decision === "CALL") {
       await sendDecisionNotification(decision);
+    } else {
+      // NONE — send a quiet summary so user can see reasoning
+      await sendNoneNotification(decision);
     }
 
     // Log the check-in

@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import { getConfig } from "../config";
 import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified } from "../db";
-import { formatStatusMessage, formatDecisionNotification } from "./messages";
+import { formatStatusMessage, formatDecisionNotification, formatNoneDecision } from "./messages";
 import { shortenId, resolveId } from "./callback-store";
 import { createChildLogger } from "../logger";
 import type { DecisionResult } from "../types";
@@ -228,6 +228,29 @@ export async function sendDecisionNotification(
   } catch (error) {
     log.error({ error }, "Failed to send decision notification");
     throw error;
+  }
+}
+
+// ── Send a quiet NONE decision summary ────────────────────────────
+
+export async function sendNoneNotification(
+  decision: DecisionResult
+): Promise<void> {
+  if (_isPaused) return;
+
+  const config = getConfig();
+  const bot = getBot();
+  const text = formatNoneDecision(decision);
+
+  try {
+    await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, text, {
+      parse_mode: "Markdown",
+      disable_notification: true, // Silent — no buzz/sound on phone
+    });
+    log.info("NONE decision summary sent (silent)");
+  } catch (error) {
+    log.error({ error }, "Failed to send NONE notification");
+    // Don't throw — NONE notifications failing shouldn't crash the cycle
   }
 }
 

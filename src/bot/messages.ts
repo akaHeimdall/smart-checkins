@@ -76,7 +76,7 @@ export function formatRawSummary(context: CollectedContext): string {
   return lines.join("\n");
 }
 
-// ── Format a Claude decision notification (Phase 2) ───────────────
+// ── Format a Claude decision notification (TEXT/CALL) ────────────
 
 export function formatDecisionNotification(result: DecisionResult): string {
   const lines: string[] = [];
@@ -84,11 +84,32 @@ export function formatDecisionNotification(result: DecisionResult): string {
   const urgencyEmoji =
     result.urgency >= 8 ? "🔴" : result.urgency >= 5 ? "🟠" : "🟢";
 
-  lines.push(`${urgencyEmoji} *Smart Check-in*`);
+  lines.push(`${urgencyEmoji} *Smart Check-in* — ${result.decision}`);
   lines.push("");
   lines.push(result.summary);
+  lines.push("");
+  lines.push(`_${escapeMarkdown(result.reasoning)}_`);
 
   return lines.join("\n");
+}
+
+// ── Format a quiet NONE decision summary ─────────────────────────
+
+export function formatNoneDecision(result: DecisionResult): string {
+  const lines: string[] = [];
+
+  lines.push("🟢 *Smart Check-in* — All clear");
+  lines.push("");
+  lines.push(`_${escapeMarkdown(result.reasoning)}_`);
+
+  return lines.join("\n");
+}
+
+// ── Escape Telegram Markdown special chars in user-facing text ────
+
+function escapeMarkdown(text: string): string {
+  // For Markdown mode, escape _ and * which are most problematic
+  return text.replace(/([_*\[\]`])/g, "\\$1");
 }
 
 // ── Format system status message ──────────────────────────────────
