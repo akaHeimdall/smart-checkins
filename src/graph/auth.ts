@@ -12,7 +12,7 @@ const GRAPH_SCOPES = ["https://graph.microsoft.com/.default"];
 const DELEGATED_SCOPES = [
   "Mail.Read",
   "Calendars.Read",
-  "Tasks.Read",
+  "Tasks.ReadWrite",
   "User.Read",
 ];
 

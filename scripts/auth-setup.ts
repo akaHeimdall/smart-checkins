@@ -40,7 +40,7 @@ const SCOPES = [
   "offline_access", // Required to get a refresh token
   "Mail.Read", // Read inbox & sent folder (no write/send needed)
   "Calendars.Read", // Read calendar events
-  "Tasks.Read", // Read To Do tasks (upgrade to Tasks.ReadWrite if Phase 2 needs task completion)
+  "Tasks.ReadWrite", // Read and create To Do tasks
   "User.Read", // Basic profile info
 ];
 

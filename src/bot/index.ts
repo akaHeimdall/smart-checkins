@@ -2,7 +2,8 @@ import { Bot, InlineKeyboard, type Context } from "grammy";
 import { getConfig } from "../config";
 import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified } from "../db";
 import { formatStatusMessage, formatDecisionNotification, formatNoneDecision } from "./messages";
-import { shortenId, resolveId } from "./callback-store";
+import { shortenId, resolveId, getEmailMeta } from "./callback-store";
+import { createTaskFromEmail } from "../collectors/tasks";
 import { createChildLogger } from "../logger";
 import type { DecisionResult } from "../types";
 import fs from "fs";
@@ -139,6 +140,29 @@ export function initBot(): Bot {
         markEmailNotified(emailId);
         await ctx.answerCallbackQuery({ text: "✅ Marked as handled" });
         log.info({ emailId }, "Email marked as handled");
+
+      } else if (data.startsWith("ct:")) {
+        // ct = create task from email (shortened prefix)
+        const shortId = data.replace("ct:", "");
+        const emailId = resolveId(shortId);
+        const meta = getEmailMeta(emailId);
+
+        if (!meta) {
+          await ctx.answerCallbackQuery({ text: "❌ Email context expired — try next cycle" });
+          log.warn({ emailId }, "No email metadata found for task creation");
+        } else {
+          await ctx.answerCallbackQuery({ text: "📝 Creating task..." });
+          const result = await createTaskFromEmail({
+            subject: meta.subject,
+            sender: meta.sender,
+            emailId,
+          });
+          await ctx.editMessageText(
+            ctx.callbackQuery.message?.text + `\n\n_📝 Task created: ${result.taskTitle}_`,
+            { parse_mode: "Markdown" }
+          );
+          log.info({ emailId, taskTitle: result.taskTitle }, "Task created from email via button");
+        }
 
       } else {
         await ctx.answerCallbackQuery({ text: `Unknown action: ${data}` });
@@ -312,6 +336,7 @@ function getButtonLabel(action: string): string {
   if (action.startsWith("snooze_email:")) return "⏰ Snooze Email (2hr)";
   if (action.startsWith("snooze_task:")) return "⏰ Snooze Task (2hr)";
   if (action.startsWith("mark_read:")) return "✅ Mark Handled";
+  if (action.startsWith("create_task:")) return "📝 Create Task";
   return action;
 }
 
@@ -335,6 +360,10 @@ function shortenCallbackData(action: string): string {
   if (action.startsWith("mark_read:")) {
     const id = action.replace("mark_read:", "");
     return `mr:${shortenId(id)}`;
+  }
+  if (action.startsWith("create_task:")) {
+    const id = action.replace("create_task:", "");
+    return `ct:${shortenId(id)}`;
   }
 
   // Fallback: truncate to 64 bytes

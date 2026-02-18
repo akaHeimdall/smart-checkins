@@ -5,6 +5,7 @@ import { enrichEmails } from "./enrichment";
 import { checkGating } from "./gating";
 import { makeDecision } from "./engine";
 import { sendDecisionNotification, sendNoneNotification, sendPlainNotification, isPaused, setOnForceCheck } from "./bot";
+import { storeEmailMeta } from "./bot/callback-store";
 import { logCheckin, cleanExpiredSnoozes } from "./db";
 import { createChildLogger } from "./logger";
 import type { CycleResult } from "./types";
@@ -65,6 +66,14 @@ export async function runCycle(options?: { skipGating?: boolean }): Promise<Cycl
 
     // Stage 2: Enrich
     context.emails = await enrichEmails(context.emails);
+
+    // Store email metadata for "Create Task" callback lookups
+    for (const email of context.emails) {
+      storeEmailMeta(email.id, {
+        subject: email.subject,
+        sender: email.from.name || email.from.address,
+      });
+    }
 
     // Clean expired snoozes
     const cleaned = cleanExpiredSnoozes();

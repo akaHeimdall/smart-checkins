@@ -34,10 +34,12 @@ When you decide TEXT or CALL, suggest relevant action buttons the user can tap i
 - \`snooze_email:{conversationId}\` — Snooze an email thread for 2 hours
 - \`snooze_task:{taskId}\` — Snooze a task for 2 hours
 - \`mark_read:{emailId}\` — Mark an email as "handled" (won't re-notify)
+- \`create_task:{emailId}\` — Create a To Do task from this email (pulls subject + sender into the task title)
 - \`snooze_all\` — Snooze everything for 1 hour
 - \`force_check\` — Run another check-in immediately
 
 Include 2-4 relevant buttons. Always include at least one snooze option when notifying.
+Suggest create_task for emails that require follow-up action — especially opportunity emails, requests, or anything the user should come back to.
 
 ## Writing Style for Summaries
 

@@ -94,6 +94,46 @@ export async function fetchOpenTasks(): Promise<TodoTask[]> {
   return allTasks;
 }
 
+// ── Create a task from an email ──────────────────────────────────
+
+export async function createTaskFromEmail(opts: {
+  subject: string;
+  sender: string;
+  emailId?: string;
+}): Promise<{ success: boolean; taskTitle: string }> {
+  const lists = await fetchTodoLists();
+  if (lists.length === 0) {
+    throw new Error("No To Do lists found");
+  }
+
+  const client = getGraphClient();
+  const userPath = getUserPath();
+  const listId = lists[0].id; // Use the default (first) list
+
+  const taskTitle = `Follow up: ${opts.subject} (from ${opts.sender})`;
+
+  const payload: Record<string, unknown> = {
+    title: taskTitle,
+    importance: "high",
+    body: {
+      content: `Created by Smart Check-ins from email.\nSender: ${opts.sender}\nSubject: ${opts.subject}`,
+      contentType: "text",
+    },
+  };
+
+  try {
+    await client
+      .api(`${userPath}/todo/lists/${listId}/tasks`)
+      .post(payload);
+
+    log.info({ taskTitle, listId, emailId: opts.emailId }, "Task created from email");
+    return { success: true, taskTitle };
+  } catch (error) {
+    log.error({ error, taskTitle }, "Failed to create task from email");
+    throw error;
+  }
+}
+
 // ── Normalize Graph importance values ─────────────────────────────
 
 function normalizeImportance(value: string): "low" | "normal" | "high" {
