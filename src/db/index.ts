@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import fs from "fs";
 import path from "path";
 import { getConfig } from "../config";
 import { createChildLogger } from "../logger";
@@ -22,6 +23,13 @@ export function initDatabase(): Database.Database {
   const config = getConfig();
   const dbPath = path.resolve(config.DATABASE_PATH);
   log.info({ dbPath }, "Initializing SQLite database");
+
+  // Ensure the parent directory exists
+  const dir = path.dirname(dbPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    log.info({ dir }, "Created database directory");
+  }
 
   _db = new Database(dbPath);
 

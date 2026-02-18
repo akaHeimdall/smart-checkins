@@ -24,7 +24,7 @@ async function main(): Promise<void> {
     initDatabase();
     log.info("Database initialized");
   } catch (error) {
-    log.fatal({ error }, "Failed to initialize database");
+    log.fatal({ error, errorMessage: (error as Error).message }, "Failed to initialize database");
     process.exit(1);
   }
 
