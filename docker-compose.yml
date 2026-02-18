@@ -1,6 +1,6 @@
 services:
   smart-checkins:
-    build: .
+    image: ghcr.io/akaheimdall/smart-checkins:latest
     container_name: smart-checkins
     restart: always
     env_file:
