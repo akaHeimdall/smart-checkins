@@ -43,10 +43,18 @@ Include 2-4 relevant buttons. Always include at least one snooze option when not
 
 - Be concise and direct — this appears on a phone screen
 - Lead with the most important item
-- Use natural language, not bullet points
+- Use bullet points with "• " prefix for each key item (max 4 bullets)
 - If mentioning calendar events, include the time
 - If mentioning emails, include who it's from
-- Keep it under 300 characters for TEXT, under 500 for CALL briefings`;
+- Keep it under 400 characters for TEXT, under 500 for CALL briefings
+
+## Writing Style for Reasoning
+
+Your reasoning is shown to the user in Telegram (in italics below the summary). Format it as short bullet points so it's easy to scan on a phone:
+- Start each point with "• "
+- Keep each point to one short sentence
+- Cover: what you looked at, why you made this decision, what you deprioritized
+- 3-6 bullet points total`;
 
 
 // ── Build the user prompt with all collected data ─────────────────

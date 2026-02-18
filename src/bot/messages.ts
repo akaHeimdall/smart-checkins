@@ -88,7 +88,8 @@ export function formatDecisionNotification(result: DecisionResult): string {
   lines.push("");
   lines.push(result.summary);
   lines.push("");
-  lines.push(`_${escapeMarkdown(result.reasoning)}_`);
+  lines.push("*Why:*");
+  lines.push(formatReasoning(result.reasoning));
 
   return lines.join("\n");
 }
@@ -100,15 +101,47 @@ export function formatNoneDecision(result: DecisionResult): string {
 
   lines.push("🟢 *Smart Check-in* — All clear");
   lines.push("");
-  lines.push(`_${escapeMarkdown(result.reasoning)}_`);
+  lines.push(formatReasoning(result.reasoning));
 
   return lines.join("\n");
+}
+
+// ── Format reasoning as clean bullet points ──────────────────────
+
+function formatReasoning(reasoning: string): string {
+  // If Claude already formatted with bullet points, clean them up
+  const bulletLines = reasoning
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const hasBullets = bulletLines.some((line) => line.startsWith("• ") || line.startsWith("- "));
+
+  if (hasBullets) {
+    return bulletLines
+      .map((line) => {
+        const text = line.replace(/^[•\-]\s*/, "");
+        return `  • _${escapeMarkdown(text)}_`;
+      })
+      .join("\n");
+  }
+
+  // Fallback: split numbered items like "1) ... 2) ..."
+  const numbered = reasoning.split(/\d+\)\s*/);
+  if (numbered.length > 2) {
+    return numbered
+      .filter((s) => s.trim().length > 0)
+      .map((s) => `  • _${escapeMarkdown(s.trim())}_`)
+      .join("\n");
+  }
+
+  // Last resort: single italic block
+  return `_${escapeMarkdown(reasoning)}_`;
 }
 
 // ── Escape Telegram Markdown special chars in user-facing text ────
 
 function escapeMarkdown(text: string): string {
-  // For Markdown mode, escape _ and * which are most problematic
   return text.replace(/([_*\[\]`])/g, "\\$1");
 }
 
