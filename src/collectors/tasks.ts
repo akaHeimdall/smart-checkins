@@ -63,21 +63,23 @@ export async function fetchOpenTasks(): Promise<TodoTask[]> {
 
   for (const list of lists) {
     try {
+      // Fetch all tasks and filter client-side — the To Do API's
+      // $filter via the Graph SDK causes ParseUri errors
       const response = await client
         .api(`${userPath}/todo/lists/${list.id}/tasks`)
-        .filter("status ne 'completed'")
-        .select("id,title,dueDateTime,importance,status")
         .get() as GraphTaskResponse;
 
-      const tasks: TodoTask[] = response.value.map((task) => ({
-        id: task.id,
-        listId: list.id,
-        listName: list.displayName,
-        title: task.title,
-        dueDateTime: task.dueDateTime?.dateTime,
-        importance: normalizeImportance(task.importance),
-        status: task.status,
-      }));
+      const tasks: TodoTask[] = response.value
+        .filter((task) => task.status !== "completed")
+        .map((task) => ({
+          id: task.id,
+          listId: list.id,
+          listName: list.displayName,
+          title: task.title,
+          dueDateTime: task.dueDateTime?.dateTime,
+          importance: normalizeImportance(task.importance),
+          status: task.status,
+        }));
 
       allTasks.push(...tasks);
     } catch (error) {
