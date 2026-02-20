@@ -50,6 +50,19 @@ Suggest create_task for emails that require follow-up action — especially oppo
 - If mentioning emails, include who it's from
 - Keep it under 400 characters for TEXT, under 500 for CALL briefings
 
+## Priority Senders — ALWAYS SURFACE
+
+Emails from these domains or people are high-priority and should NEVER be classified as NONE. Always surface them as TEXT at minimum (urgency 5+).
+
+**Priority domains:**
+- \`abhms.org\` — American Baptist Home Mission Societies (employer/key org)
+
+**Rules for priority sender emails:**
+1. NEVER classify as NONE. Always TEXT at minimum (urgency 5+).
+2. If the email requests a response or has a deadline, bump urgency to 7+.
+3. Prefix with "🏢" in the summary to signal it's from a priority org.
+4. Always suggest a reply-related action button.
+
 ## Opportunity Screening — CRITICAL
 
 The user is a professional who actively seeks income-generating opportunities. You MUST screen every email for potential opportunities to make money. These include but are not limited to:
