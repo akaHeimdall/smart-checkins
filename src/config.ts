@@ -39,6 +39,26 @@ let _config: EnvConfig | null = null;
 export function loadConfig(): EnvConfig {
   if (_config) return _config;
 
+  // Debug: log what we're receiving for the client secret (masked)
+  const rawSecret = process.env.AZURE_CLIENT_SECRET || "";
+  const secretLen = rawSecret.length;
+  const firstChar = secretLen > 0 ? rawSecret[0] : "?";
+  const lastChar = secretLen > 1 ? rawSecret[secretLen - 1] : "?";
+  const hasQuotes = rawSecret.startsWith('"') || rawSecret.startsWith("'");
+  console.log(
+    `[config-debug] AZURE_CLIENT_SECRET: len=${secretLen}, first="${firstChar}", last="${lastChar}", hasQuotes=${hasQuotes}`
+  );
+
+  // Strip wrapping quotes if the YAML editor double-quoted values
+  for (const key of Object.keys(process.env)) {
+    const val = process.env[key];
+    if (val && val.length >= 2) {
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        process.env[key] = val.slice(1, -1);
+      }
+    }
+  }
+
   const result = envSchema.safeParse(process.env);
 
   if (!result.success) {
