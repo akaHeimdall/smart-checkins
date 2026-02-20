@@ -11,6 +11,21 @@ import path from "path";
 
 const log = createChildLogger("bot");
 
+const HELP_TEXT =
+  "👋 *Smart Check\\-ins*\n\n" +
+  "I monitor your Outlook email, calendar, and tasks every 30 min, then notify you only when it matters\\.\n\n" +
+  "⚡ *Actions*\n" +
+  "/force — Run a check\\-in now \\(skips cooldown\\)\n" +
+  "/pause — Pause all notifications\n" +
+  "/resume — Resume notifications\n\n" +
+  "📋 *Info*\n" +
+  "/status — System health \\& uptime\n" +
+  "/help — Show this message\n\n" +
+  "🏢 *Priority Senders*\n" +
+  "/priority — List priority senders\n" +
+  "/priority add user@domain\\.com \\- Label\n" +
+  "/priority remove user@domain\\.com";
+
 let _bot: Bot | null = null;
 const _startTime = new Date();
 
@@ -24,17 +39,12 @@ export function initBot(): Bot {
 
   // ── /start command ──────────────────────────────────────────
   _bot.command("start", async (ctx: Context) => {
-    await ctx.reply(
-      "👋 *Smart Check-ins* is active\\!\n\n" +
-        "I monitor your Outlook email, calendar, and tasks, then contact you only when it matters\\.\n\n" +
-        "Commands:\n" +
-        "/status \\- System health\n" +
-        "/force \\- Run a check\\-in now\n" +
-        "/pause \\- Pause notifications\n" +
-        "/resume \\- Resume notifications\n" +
-        "/priority \\- Manage priority senders",
-      { parse_mode: "MarkdownV2" }
-    );
+    await ctx.reply(HELP_TEXT, { parse_mode: "MarkdownV2" });
+  });
+
+  // ── /help command ──────────────────────────────────────────
+  _bot.command("help", async (ctx: Context) => {
+    await ctx.reply(HELP_TEXT, { parse_mode: "MarkdownV2" });
   });
 
   // ── /status command ─────────────────────────────────────────
