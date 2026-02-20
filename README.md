@@ -14,19 +14,21 @@ Smart Check-ins runs a 5-stage pipeline every 30 minutes:
 
 ## Features
 
-- **Opportunity screening** — Emails containing speaking engagements, preaching invitations, freelance gigs, job offers, or any money-making opportunities are always surfaced (never classified as NONE) and flagged with a 💰 emoji.
+- **Opportunity screening (direct + indirect)** — Screens every email for both direct opportunities (speaking invitations, job offers, freelance gigs, paid collaborations) flagged with 💰, and indirect leads (conference announcements, call-for-speakers, networking events, grant cycles) flagged with 🔍. All opportunities auto-include a "Create Task" button for instant follow-up tracking.
+- **Priority senders** — Manage priority email domains and addresses via Telegram (`/priority`). Emails from priority senders are always surfaced (urgency 5+, never NONE) and flagged with 🏢. Stored in SQLite and dynamically loaded into Claude's prompt each cycle.
 - **Task creation from emails** — Claude suggests a "📝 Create Task" button on actionable emails. Tapping it creates a high-priority task in your default Microsoft To Do list with the subject and sender.
 - **Inline action buttons** — Snooze emails/tasks for 2 hours, mark emails as handled, snooze everything for 1 hour, or force an immediate check-in — all from Telegram.
 - **Smart gating** — Respects quiet hours, focus hours, a 2-hour cooldown between notifications, and reduced weekend mode. Startup and `/force` commands bypass gating.
 - **Partnership memory** — Tracks repeat contacts by email domain so Claude can prioritize emails from known partners.
 - **Bullet-point reasoning** — Every notification includes Claude's reasoning as scannable bullet points, so you always know why you were (or weren't) notified.
+- **YAML quote-stripping** — Automatically strips wrapping quotes from environment variables, preventing issues with Docker Compose YAML editors that double-quote values.
 
 ## Architecture
 
 ```
 src/
 ├── index.ts                    Entry point, startup/shutdown
-├── config.ts                   Zod-validated environment config
+├── config.ts                   Zod-validated environment config + quote-stripping
 ├── logger.ts                   Pino structured JSON logging
 ├── scheduler.ts                Cron orchestration, 5-stage pipeline
 ├── types/index.ts              All TypeScript interfaces
@@ -42,7 +44,7 @@ src/
 │
 ├── engine/
 │   ├── index.ts                Claude API integration (tool_use)
-│   └── prompt.ts               System prompt + context builder
+│   └── prompt.ts               Dynamic system prompt + context builder
 │
 ├── graph/
 │   ├── auth.ts                 MSAL token acquisition (delegated + client creds)
@@ -134,6 +136,8 @@ After signing in, copy the refresh token and add it to your `.env`:
 ```
 AZURE_REFRESH_TOKEN=the-long-refresh-token
 ```
+
+**Important:** The refresh token is tied to the client secret that was active when you ran auth-setup. If you rotate the client secret, you must re-run auth-setup to get a new matching refresh token.
 
 ### 6. Run the app
 
@@ -230,6 +234,8 @@ volumes:
     driver: local
 ```
 
+**Note:** Do not wrap environment values in double quotes in the YAML — the app includes automatic quote-stripping, but it's best to keep values unquoted to avoid ambiguity.
+
 ### Useful Docker commands
 
 ```bash
@@ -243,11 +249,15 @@ docker compose ps                   # Check health status
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Welcome message and command list |
+| `/help` | Show all available commands |
+| `/start` | Welcome message (same as /help) |
 | `/status` | System health: uptime, DB size, last cycle, data sources |
-| `/force` | Run an immediate check-in (bypasses gating) |
+| `/force` | Run an immediate check-in (bypasses gating cooldown) |
 | `/pause` | Pause all notifications |
 | `/resume` | Resume notifications |
+| `/priority` | List all priority senders |
+| `/priority add <email\|@domain> - Label` | Add a priority sender |
+| `/priority remove <email\|@domain>` | Remove a priority sender |
 
 ## Inline Action Buttons
 
@@ -292,7 +302,13 @@ Claude evaluates all collected context and returns a structured decision using t
 - 7–8: Needs attention within hours (TEXT)
 - 9–10: Urgent/time-critical (CALL)
 
-**Opportunity screening:** Emails related to speaking, preaching, gigs, jobs, paid collaborations, or any income-generating opportunities are always surfaced as TEXT with urgency 5+ and a 💰 flag. False positives are preferred over missed opportunities.
+**Opportunity screening:** The engine screens every email for two tiers of opportunities:
+- **Direct opportunities (💰)** — Speaking engagements, preaching invitations, freelance gigs, job offers, paid collaborations, honorariums. Always surfaced as TEXT with urgency 5+.
+- **Indirect leads (🔍)** — Conference announcements, call-for-speakers, networking events, grant cycles, training programs, industry meetups, and relevant events buried in newsletters. Flagged with a suggested next action (attend, submit proposal, reach out, etc.).
+
+All opportunity emails automatically include a "📝 Create Task" button so you can instantly track the follow-up in Microsoft To Do.
+
+**Priority senders:** Emails from domains or addresses configured via `/priority` are always surfaced (urgency 5+, never NONE) and flagged with 🏢. Priority senders are stored in SQLite and dynamically loaded into Claude's system prompt each cycle.
 
 ## Database
 
@@ -307,6 +323,7 @@ SQLite with WAL mode and foreign keys enabled. The database is auto-created on f
 | `snoozed_items` | Temporarily snoozed emails/tasks with expiry timestamps |
 | `memory` | Key-value store for user context and preferences |
 | `email_tracking` | Tracks when emails were first seen, last notified, and reply status |
+| `priority_senders` | Priority email domains/addresses managed via /priority command |
 | `call_log` | Voice call history (Phase 3) |
 
 ## Updating
@@ -332,6 +349,8 @@ npx tsx scripts/auth-setup.ts
 ```
 
 Then update the `AZURE_REFRESH_TOKEN` in your `.env` or hosting environment and restart/redeploy.
+
+**Important:** The refresh token is tied to the client secret. If you rotate the client secret in Azure, you must also re-run auth-setup and update both `AZURE_CLIENT_SECRET` and `AZURE_REFRESH_TOKEN` in your deployment.
 
 ## Tech Stack
 
