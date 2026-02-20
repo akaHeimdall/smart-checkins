@@ -1,2 +1,2 @@
 export { getAccessToken, resetAuth } from "./auth";
-export { getGraphClient, getUserPath, graphGet } from "./client";
+export { getGraphClient, getUserPath, graphGet, graphPost } from "./client";

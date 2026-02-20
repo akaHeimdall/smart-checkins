@@ -1,6 +1,7 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import { getConfig } from "../config";
-import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified, addPrioritySender, removePrioritySender, getAllPrioritySenders, upsertPartnership, getAllPartnerships, getPartnershipByDomain, markDomainSuggested } from "../db";
+import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified, addPrioritySender, removePrioritySender, getAllPrioritySenders, upsertPartnership, getAllPartnerships, getPartnershipByDomain, markDomainSuggested, getDraftCount } from "../db";
+import { analyzeWritingStyle, getStyleSummary, createDraftReply } from "../drafts";
 import { formatStatusMessage, formatDecisionNotification, formatNoneDecision } from "./messages";
 import { shortenId, resolveId, getEmailMeta } from "./callback-store";
 import { createTaskFromEmail } from "../collectors/tasks";
@@ -28,7 +29,10 @@ const HELP_TEXT =
   "🤝 *Partners*\n" +
   "/partner — List partners\n" +
   "/partner add domain\\.com \\- Company Name\n" +
-  "/partner remove domain\\.com";
+  "/partner remove domain\\.com\n\n" +
+  "✍️ *Writing Style \\& Drafts*\n" +
+  "/style — View your voice profiles\n" +
+  "/style learn — Analyze sent mail to learn your style";
 
 let _bot: Bot | null = null;
 const _startTime = new Date();
@@ -291,6 +295,52 @@ export function initBot(): Bot {
     );
   });
 
+  // ── /style command ────────────────────────────────────────────
+  _bot.command("style", async (ctx: Context) => {
+    const text = ctx.message?.text ?? "";
+    const args = text.replace(/^\/style\s*/, "").trim();
+
+    if (args === "learn") {
+      await ctx.reply("🔍 Analyzing your sent emails to learn your writing style... This may take a minute.");
+      try {
+        const result = await analyzeWritingStyle();
+        if (result.total === 0) {
+          await ctx.reply("⚠️ No sent emails found to analyze. Make sure Mail.ReadWrite permission is granted and re-run auth-setup.");
+          return;
+        }
+
+        const lines = [];
+        if (result.analyzed.internal_formal > 0) lines.push(`• Internal (Formal): ${result.analyzed.internal_formal} samples`);
+        if (result.analyzed.external_formal > 0) lines.push(`• External (Formal): ${result.analyzed.external_formal} samples`);
+        if (result.analyzed.casual > 0) lines.push(`• Casual: ${result.analyzed.casual} samples`);
+
+        const skipped = [];
+        if (result.analyzed.internal_formal === 0) skipped.push("Internal (Formal)");
+        if (result.analyzed.external_formal === 0) skipped.push("External (Formal)");
+        if (result.analyzed.casual === 0) skipped.push("Casual");
+
+        let msg = `✅ *Style Analysis Complete*\n\nAnalyzed ${result.total} emails:\n${lines.join("\n")}`;
+        if (skipped.length > 0) {
+          msg += `\n\nSkipped (not enough samples): ${skipped.join(", ")}`;
+        }
+        msg += "\n\nI'll now use these profiles when drafting replies. Use /style to view profile details.";
+
+        await ctx.reply(msg, { parse_mode: "Markdown" });
+        log.info({ result }, "Style learning completed via Telegram");
+      } catch (error) {
+        log.error({ error }, "Style learning failed");
+        await ctx.reply("❌ Style analysis failed. Check logs for details.");
+      }
+      return;
+    }
+
+    // Default: show current profiles
+    const summary = getStyleSummary();
+    const drafts = getDraftCount();
+    const header = `✍️ *Voice Profiles*\n\nDrafts created: ${drafts}\n\n`;
+    await ctx.reply(header + summary, { parse_mode: "Markdown" });
+  });
+
   // ── Callback query handler (for inline buttons) ─────────────
   _bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
@@ -361,6 +411,30 @@ export function initBot(): Bot {
             { parse_mode: "Markdown" }
           );
           log.info({ emailId, taskTitle: result.taskTitle }, "Task created from email via button");
+        }
+
+      } else if (data.startsWith("dr:")) {
+        // dr = draft reply (shortened prefix)
+        const shortId = data.replace("dr:", "");
+        const emailId = resolveId(shortId);
+
+        await ctx.answerCallbackQuery({ text: "✍️ Drafting reply..." });
+        try {
+          const result = await createDraftReply(emailId);
+          const modeLabel = result.styleMode === "casual" ? "Casual" :
+            result.styleMode === "internal_formal" ? "Internal" : "External";
+          await ctx.editMessageText(
+            ctx.callbackQuery.message?.text +
+              `\n\n_✍️ Draft created (${modeLabel} style): ${result.bodyPreview}_`,
+            { parse_mode: "Markdown" }
+          );
+          log.info({ emailId, styleMode: result.styleMode, draftId: result.draftId }, "Draft reply created via button");
+        } catch (error) {
+          log.error({ error, emailId }, "Failed to create draft reply");
+          await ctx.editMessageText(
+            ctx.callbackQuery.message?.text + "\n\n_❌ Failed to create draft — check permissions_",
+            { parse_mode: "Markdown" }
+          );
         }
 
       } else if (data.startsWith("pa:")) {
@@ -589,6 +663,7 @@ function getButtonLabel(action: string): string {
   if (action.startsWith("snooze_task:")) return "⏰ Snooze Task (2hr)";
   if (action.startsWith("mark_read:")) return "✅ Mark Handled";
   if (action.startsWith("create_task:")) return "📝 Create Task";
+  if (action.startsWith("draft_reply:")) return "✍️ Draft Reply";
   return action;
 }
 
@@ -616,6 +691,10 @@ function shortenCallbackData(action: string): string {
   if (action.startsWith("create_task:")) {
     const id = action.replace("create_task:", "");
     return `ct:${shortenId(id)}`;
+  }
+  if (action.startsWith("draft_reply:")) {
+    const id = action.replace("draft_reply:", "");
+    return `dr:${shortenId(id)}`;
   }
 
   // Fallback: truncate to 64 bytes

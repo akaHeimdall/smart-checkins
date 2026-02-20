@@ -132,10 +132,29 @@ function runMigrations(db: Database.Database): void {
       added_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS voice_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      style_mode TEXT NOT NULL UNIQUE CHECK (style_mode IN ('internal_formal', 'external_formal', 'casual')),
+      profile_data TEXT NOT NULL DEFAULT '{}',
+      sample_count INTEGER NOT NULL DEFAULT 0,
+      last_analyzed TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS draft_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      style_mode TEXT NOT NULL,
+      draft_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_checkin_log_timestamp ON checkin_log(timestamp);
     CREATE INDEX IF NOT EXISTS idx_partnerships_domain ON partnerships(domain);
     CREATE INDEX IF NOT EXISTS idx_snoozed_items_until ON snoozed_items(snooze_until);
     CREATE INDEX IF NOT EXISTS idx_email_tracking_conv ON email_tracking(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_draft_log_email ON draft_log(email_id);
   `);
 
   // Seed initial partners (idempotent via INSERT OR IGNORE pattern in upsert)
@@ -421,6 +440,84 @@ export function getAllPrioritySenders(): PrioritySender[] {
        FROM priority_senders ORDER BY added_at DESC`
     )
     .all() as PrioritySender[];
+}
+
+// ── Voice profile queries ─────────────────────────────────────
+
+export type StyleMode = "internal_formal" | "external_formal" | "casual";
+
+export interface VoiceProfile {
+  id: number;
+  styleMode: StyleMode;
+  profileData: string; // JSON string of analyzed style traits
+  sampleCount: number;
+  lastAnalyzed: string;
+  updatedAt: string;
+}
+
+export function getVoiceProfile(styleMode: StyleMode): VoiceProfile | null {
+  const db = getDatabase();
+  const row = db
+    .prepare(
+      `SELECT id, style_mode as styleMode, profile_data as profileData,
+              sample_count as sampleCount, last_analyzed as lastAnalyzed,
+              updated_at as updatedAt
+       FROM voice_profiles WHERE style_mode = ?`
+    )
+    .get(styleMode) as VoiceProfile | undefined;
+  return row ?? null;
+}
+
+export function getAllVoiceProfiles(): VoiceProfile[] {
+  const db = getDatabase();
+  return db
+    .prepare(
+      `SELECT id, style_mode as styleMode, profile_data as profileData,
+              sample_count as sampleCount, last_analyzed as lastAnalyzed,
+              updated_at as updatedAt
+       FROM voice_profiles ORDER BY style_mode`
+    )
+    .all() as VoiceProfile[];
+}
+
+export function upsertVoiceProfile(
+  styleMode: StyleMode,
+  profileData: string,
+  sampleCount: number
+): void {
+  const db = getDatabase();
+  db.prepare(
+    `INSERT INTO voice_profiles (style_mode, profile_data, sample_count, last_analyzed, updated_at)
+     VALUES (?, ?, ?, datetime('now'), datetime('now'))
+     ON CONFLICT(style_mode) DO UPDATE SET
+       profile_data = ?,
+       sample_count = ?,
+       last_analyzed = datetime('now'),
+       updated_at = datetime('now')`
+  ).run(styleMode, profileData, sampleCount, profileData, sampleCount);
+}
+
+// ── Draft log queries ────────────────────────────────────────────
+
+export function logDraft(
+  emailId: string,
+  conversationId: string,
+  styleMode: StyleMode,
+  draftId?: string
+): void {
+  const db = getDatabase();
+  db.prepare(
+    `INSERT INTO draft_log (email_id, conversation_id, style_mode, draft_id)
+     VALUES (?, ?, ?, ?)`
+  ).run(emailId, conversationId, styleMode, draftId ?? null);
+}
+
+export function getDraftCount(): number {
+  const db = getDatabase();
+  const row = db
+    .prepare(`SELECT COUNT(*) as count FROM draft_log`)
+    .get() as { count: number };
+  return row.count;
 }
 
 // ── Call log queries ──────────────────────────────────────────────

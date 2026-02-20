@@ -20,6 +20,7 @@ Smart Check-ins runs a 5-stage pipeline every 30 minutes:
 - **Inline action buttons** — Snooze emails/tasks for 2 hours, mark emails as handled, snooze everything for 1 hour, or force an immediate check-in — all from Telegram.
 - **Smart gating** — Respects quiet hours, focus hours, a 2-hour cooldown between notifications, and reduced weekend mode. Startup and `/force` commands bypass gating.
 - **Partnership tracking** — Manage business partners via Telegram (`/partner`). Partners get prioritized in notifications with reply tracking. The system also auto-tracks email domain interactions and suggests new partners after 3+ meaningful emails — you'll get a Telegram message with Accept/Decline buttons.
+- **Draft replies with voice profiles** — The system learns your writing style by analyzing your sent emails across three modes: Internal (Formal), External (Formal), and Casual. When Claude suggests a "✍️ Draft Reply" button, tapping it generates a draft reply in your Outlook Drafts folder written in your voice. Use `/style learn` to train your profiles and `/style` to view them.
 - **Bullet-point reasoning** — Every notification includes Claude's reasoning as scannable bullet points, so you always know why you were (or weren't) notified.
 - **YAML quote-stripping** — Automatically strips wrapping quotes from environment variables, preventing issues with Docker Compose YAML editors that double-quote values.
 
@@ -46,9 +47,14 @@ src/
 │   ├── index.ts                Claude API integration (tool_use)
 │   └── prompt.ts               Dynamic system prompt + context builder
 │
+├── drafts/
+│   ├── index.ts                Module exports
+│   ├── style-analyzer.ts       Sent mail analysis → voice profiles (3 modes)
+│   └── draft-creator.ts        Claude-powered draft replies via Graph API
+│
 ├── graph/
 │   ├── auth.ts                 MSAL token acquisition (delegated + client creds)
-│   ├── client.ts               Microsoft Graph SDK initialization
+│   ├── client.ts               Microsoft Graph SDK (graphGet + graphPost)
 │   └── index.ts                Module exports
 │
 ├── bot/
@@ -92,7 +98,7 @@ In the Azure Portal:
 3. Set redirect URI: **Web** → `http://localhost:3847/callback`
 4. Under **Certificates & secrets**, create a new client secret. Copy the **Value** (not the ID).
 5. Under **API permissions**, add these Microsoft Graph **delegated** permissions:
-   - `Mail.Read`
+   - `Mail.ReadWrite` (read inbox/sent + create drafts)
    - `Calendars.Read`
    - `Tasks.ReadWrite`
    - `User.Read`
@@ -261,6 +267,8 @@ docker compose ps                   # Check health status
 | `/partner` | List all partners |
 | `/partner add <domain> - Company Name` | Add a partner |
 | `/partner remove <domain>` | Remove a partner |
+| `/style` | View your voice profiles and draft stats |
+| `/style learn` | Analyze your sent emails to build/update voice profiles |
 
 ## Inline Action Buttons
 
@@ -272,6 +280,7 @@ When Claude decides to notify you, the Telegram message includes tappable button
 | ⏰ Snooze Task (2hr) | Suppress re-notification for this task |
 | ✅ Mark Handled | Mark email as handled so it won't trigger again |
 | 📝 Create Task | Create a To Do task from this email (subject + sender) |
+| ✍️ Draft Reply | Generate a draft reply in your Outlook Drafts folder using your voice profile |
 | ⏰ Snooze All (1hr) | Suppress all notifications for 1 hour |
 | ⚡ Check Again | Trigger an immediate check-in cycle |
 
@@ -328,6 +337,8 @@ SQLite with WAL mode and foreign keys enabled. The database is auto-created on f
 | `email_tracking` | Tracks when emails were first seen, last notified, and reply status |
 | `priority_senders` | Priority email domains/addresses managed via /priority command |
 | `domain_interactions` | Tracks email counts per domain for auto partner suggestions |
+| `voice_profiles` | Writing style profiles per mode (internal_formal, external_formal, casual) |
+| `draft_log` | History of AI-generated draft replies with style mode and draft ID |
 | `call_log` | Voice call history (Phase 3) |
 
 ## Updating
@@ -346,7 +357,7 @@ Redeploy the project — it will pull the latest `ghcr.io/akaheimdall/smart-chec
 
 ## Re-authenticating
 
-If you change API permissions (e.g., adding `Mail.Send`) or if your refresh token expires, re-run the auth setup:
+If you change API permissions (e.g., upgrading `Mail.Read` to `Mail.ReadWrite` for draft replies) or if your refresh token expires, re-run the auth setup:
 
 ```bash
 npx tsx scripts/auth-setup.ts

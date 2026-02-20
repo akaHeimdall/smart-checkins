@@ -49,6 +49,24 @@ export function getUserPath(): string {
 
 // ── Generic Graph request with error handling ─────────────────────
 
+export async function graphPost<T>(path: string, body: unknown): Promise<T> {
+  const client = getGraphClient();
+  const fullPath = `${getUserPath()}${path}`;
+
+  try {
+    const result = await client.api(fullPath).post(body);
+    log.debug({ path: fullPath }, "Graph API POST succeeded");
+    return result as T;
+  } catch (error: unknown) {
+    const err = error as { statusCode?: number; message?: string };
+    log.error(
+      { path: fullPath, statusCode: err.statusCode, message: err.message },
+      "Graph API POST failed"
+    );
+    throw error;
+  }
+}
+
 export async function graphGet<T>(path: string, queryParams?: Record<string, string>): Promise<T> {
   const client = getGraphClient();
   const fullPath = `${getUserPath()}${path}`;
