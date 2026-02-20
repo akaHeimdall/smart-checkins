@@ -115,6 +115,16 @@ function runMigrations(db: Database.Database): void {
       snooze_until TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS domain_interactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      domain TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL DEFAULT '',
+      email_count INTEGER NOT NULL DEFAULT 0,
+      first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen TEXT NOT NULL DEFAULT (datetime('now')),
+      suggested INTEGER NOT NULL DEFAULT 0
+    );
+
     CREATE TABLE IF NOT EXISTS priority_senders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       pattern TEXT NOT NULL UNIQUE,
@@ -127,6 +137,24 @@ function runMigrations(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_snoozed_items_until ON snoozed_items(snooze_until);
     CREATE INDEX IF NOT EXISTS idx_email_tracking_conv ON email_tracking(conversation_id);
   `);
+
+  // Seed initial partners (idempotent via INSERT OR IGNORE pattern in upsert)
+  const seedPartners = [
+    { domain: "salesforce.com", companyName: "Salesforce" },
+    { domain: "konicaminolta.com", companyName: "Konica Minolta" },
+    { domain: "sdpconference.info", companyName: "SDP Conference" },
+  ];
+  for (const p of seedPartners) {
+    const existing = db
+      .prepare(`SELECT id FROM partnerships WHERE domain = ?`)
+      .get(p.domain);
+    if (!existing) {
+      db.prepare(
+        `INSERT INTO partnerships (domain, company_name, last_contact, contact_count, status)
+         VALUES (?, ?, datetime('now'), 0, 'active')`
+      ).run(p.domain, p.companyName);
+    }
+  }
 
   log.debug("Migrations complete");
 }
@@ -303,6 +331,62 @@ export function getEmailTracking(conversationId: string): EmailTracking | null {
     )
     .get(conversationId) as EmailTracking | undefined;
   return row ?? null;
+}
+
+// ── Domain interaction tracking ──────────────────────────────
+
+export interface DomainInteraction {
+  id: number;
+  domain: string;
+  displayName: string;
+  emailCount: number;
+  firstSeen: string;
+  lastSeen: string;
+  suggested: number;
+}
+
+/**
+ * Record an email interaction from a domain. Increments count and updates
+ * display_name to the most recent sender name.
+ */
+export function trackDomainInteraction(domain: string, displayName: string): void {
+  const db = getDatabase();
+  db.prepare(
+    `INSERT INTO domain_interactions (domain, display_name, email_count, first_seen, last_seen)
+     VALUES (?, ?, 1, datetime('now'), datetime('now'))
+     ON CONFLICT(domain) DO UPDATE SET
+       email_count = email_count + 1,
+       display_name = ?,
+       last_seen = datetime('now')`
+  ).run(domain, displayName, displayName);
+}
+
+/**
+ * Get domains that have crossed the interaction threshold but haven't been
+ * suggested yet and aren't already partners.
+ */
+export function getUnsuggestedDomains(threshold: number): DomainInteraction[] {
+  const db = getDatabase();
+  return db
+    .prepare(
+      `SELECT id, domain, display_name as displayName, email_count as emailCount,
+              first_seen as firstSeen, last_seen as lastSeen, suggested
+       FROM domain_interactions
+       WHERE email_count >= ? AND suggested = 0
+         AND domain NOT IN (SELECT domain FROM partnerships WHERE status = 'active')
+       ORDER BY email_count DESC`
+    )
+    .all(threshold) as DomainInteraction[];
+}
+
+/**
+ * Mark a domain as suggested so we don't keep asking.
+ */
+export function markDomainSuggested(domain: string): void {
+  const db = getDatabase();
+  db.prepare(
+    `UPDATE domain_interactions SET suggested = 1 WHERE domain = ?`
+  ).run(domain);
 }
 
 // ── Priority sender queries ──────────────────────────────────

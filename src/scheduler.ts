@@ -4,9 +4,9 @@ import { collectContext } from "./collectors";
 import { enrichEmails } from "./enrichment";
 import { checkGating } from "./gating";
 import { makeDecision } from "./engine";
-import { sendDecisionNotification, sendNoneNotification, sendPlainNotification, isPaused, setOnForceCheck } from "./bot";
+import { sendDecisionNotification, sendNoneNotification, sendPlainNotification, sendPartnerSuggestion, isPaused, setOnForceCheck } from "./bot";
 import { storeEmailMeta } from "./bot/callback-store";
-import { logCheckin, cleanExpiredSnoozes } from "./db";
+import { logCheckin, cleanExpiredSnoozes, getUnsuggestedDomains, markDomainSuggested } from "./db";
 import { createChildLogger } from "./logger";
 import type { CycleResult } from "./types";
 
@@ -99,6 +99,19 @@ export async function runCycle(options?: { skipGating?: boolean }): Promise<Cycl
       decision.summary,
       context.sourcesAvailable
     );
+
+    // Check for domains that should be suggested as partners (threshold: 3+ emails)
+    const PARTNER_SUGGESTION_THRESHOLD = 3;
+    try {
+      const candidates = getUnsuggestedDomains(PARTNER_SUGGESTION_THRESHOLD);
+      for (const candidate of candidates.slice(0, 1)) {
+        // Send max 1 suggestion per cycle to avoid spam
+        await sendPartnerSuggestion(candidate.domain, candidate.displayName, candidate.emailCount);
+        markDomainSuggested(candidate.domain);
+      }
+    } catch (error) {
+      log.warn({ error }, "Failed to check partner suggestions");
+    }
 
     const result: CycleResult = {
       cycleId,

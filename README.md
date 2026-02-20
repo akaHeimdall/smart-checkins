@@ -19,7 +19,7 @@ Smart Check-ins runs a 5-stage pipeline every 30 minutes:
 - **Task creation from emails** — Claude suggests a "📝 Create Task" button on actionable emails. Tapping it creates a high-priority task in your default Microsoft To Do list with the subject and sender.
 - **Inline action buttons** — Snooze emails/tasks for 2 hours, mark emails as handled, snooze everything for 1 hour, or force an immediate check-in — all from Telegram.
 - **Smart gating** — Respects quiet hours, focus hours, a 2-hour cooldown between notifications, and reduced weekend mode. Startup and `/force` commands bypass gating.
-- **Partnership memory** — Tracks repeat contacts by email domain so Claude can prioritize emails from known partners.
+- **Partnership tracking** — Manage business partners via Telegram (`/partner`). Partners get prioritized in notifications with reply tracking. The system also auto-tracks email domain interactions and suggests new partners after 3+ meaningful emails — you'll get a Telegram message with Accept/Decline buttons.
 - **Bullet-point reasoning** — Every notification includes Claude's reasoning as scannable bullet points, so you always know why you were (or weren't) notified.
 - **YAML quote-stripping** — Automatically strips wrapping quotes from environment variables, preventing issues with Docker Compose YAML editors that double-quote values.
 
@@ -258,6 +258,9 @@ docker compose ps                   # Check health status
 | `/priority` | List all priority senders |
 | `/priority add <email\|@domain> - Label` | Add a priority sender |
 | `/priority remove <email\|@domain>` | Remove a priority sender |
+| `/partner` | List all partners |
+| `/partner add <domain> - Company Name` | Add a partner |
+| `/partner remove <domain>` | Remove a partner |
 
 ## Inline Action Buttons
 
@@ -324,6 +327,7 @@ SQLite with WAL mode and foreign keys enabled. The database is auto-created on f
 | `memory` | Key-value store for user context and preferences |
 | `email_tracking` | Tracks when emails were first seen, last notified, and reply status |
 | `priority_senders` | Priority email domains/addresses managed via /priority command |
+| `domain_interactions` | Tracks email counts per domain for auto partner suggestions |
 | `call_log` | Voice call history (Phase 3) |
 
 ## Updating

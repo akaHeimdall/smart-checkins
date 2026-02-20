@@ -1,6 +1,6 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import { getConfig } from "../config";
-import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified, addPrioritySender, removePrioritySender, getAllPrioritySenders } from "../db";
+import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified, addPrioritySender, removePrioritySender, getAllPrioritySenders, upsertPartnership, getAllPartnerships, getPartnershipByDomain, markDomainSuggested } from "../db";
 import { formatStatusMessage, formatDecisionNotification, formatNoneDecision } from "./messages";
 import { shortenId, resolveId, getEmailMeta } from "./callback-store";
 import { createTaskFromEmail } from "../collectors/tasks";
@@ -24,7 +24,11 @@ const HELP_TEXT =
   "🏢 *Priority Senders*\n" +
   "/priority — List priority senders\n" +
   "/priority add user@domain\\.com \\- Label\n" +
-  "/priority remove user@domain\\.com";
+  "/priority remove user@domain\\.com\n\n" +
+  "🤝 *Partners*\n" +
+  "/partner — List partners\n" +
+  "/partner add domain\\.com \\- Company Name\n" +
+  "/partner remove domain\\.com";
 
 let _bot: Bot | null = null;
 const _startTime = new Date();
@@ -197,6 +201,96 @@ export function initBot(): Bot {
     );
   });
 
+  // ── /partner command ──────────────────────────────────────────
+  _bot.command("partner", async (ctx: Context) => {
+    const text = ctx.message?.text ?? "";
+    const args = text.replace(/^\/partner\s*/, "").trim();
+
+    // No args = list all
+    if (!args) {
+      const partners = getAllPartnerships();
+      if (partners.length === 0) {
+        await ctx.reply(
+          "🤝 *Partners*\n\nNo partners configured\\.\n\n" +
+            "Usage:\n" +
+            "`/partner add domain\\.com \\- Company Name`\n" +
+            "`/partner remove domain\\.com`\n" +
+            "`/partner` \\- List all",
+          { parse_mode: "MarkdownV2" }
+        );
+      } else {
+        const list = partners
+          .map((p) => `• \`${p.domain}\` — ${p.companyName} (${p.contactCount} interactions)`)
+          .join("\n");
+        await ctx.reply(`🤝 *Partners*\n\n${list}`, {
+          parse_mode: "Markdown",
+        });
+      }
+      return;
+    }
+
+    // /partner add <domain> - <company name>
+    if (args.startsWith("add ")) {
+      const rest = args.replace("add ", "").trim();
+      const dashIdx = rest.indexOf(" - ");
+      let domain: string;
+      let companyName: string;
+
+      if (dashIdx > -1) {
+        domain = rest.slice(0, dashIdx).trim().toLowerCase();
+        companyName = rest.slice(dashIdx + 3).trim();
+      } else {
+        domain = rest.toLowerCase();
+        companyName = domain; // Use domain as name if not specified
+      }
+
+      if (!domain || !domain.includes(".")) {
+        await ctx.reply("❌ Usage: `/partner add domain.com - Company Name`", {
+          parse_mode: "Markdown",
+        });
+        return;
+      }
+
+      // Strip leading @ if user typed @domain.com
+      domain = domain.replace(/^@/, "");
+
+      upsertPartnership(domain, companyName);
+      await ctx.reply(`✅ Added partner: \`${domain}\` (${companyName})`, {
+        parse_mode: "Markdown",
+      });
+      log.info({ domain, companyName }, "Partner added via Telegram");
+      return;
+    }
+
+    // /partner remove <domain>
+    if (args.startsWith("remove ") || args.startsWith("rm ")) {
+      const domain = args.replace(/^(remove|rm)\s+/, "").trim().toLowerCase().replace(/^@/, "");
+      if (!domain) {
+        await ctx.reply("❌ Usage: `/partner remove domain.com`", {
+          parse_mode: "Markdown",
+        });
+        return;
+      }
+
+      const existing = getPartnershipByDomain(domain);
+      if (existing) {
+        const db = (await import("../db")).getDatabase();
+        db.prepare(`UPDATE partnerships SET status = 'inactive' WHERE domain = ?`).run(domain);
+        await ctx.reply(`🗑 Removed partner: \`${domain}\``, { parse_mode: "Markdown" });
+        log.info({ domain }, "Partner removed via Telegram");
+      } else {
+        await ctx.reply(`❌ Not found: \`${domain}\``, { parse_mode: "Markdown" });
+      }
+      return;
+    }
+
+    // Unknown subcommand
+    await ctx.reply(
+      "❓ Unknown subcommand. Try:\n`/partner add domain.com - Company Name`\n`/partner remove domain.com`\n`/partner` (list all)",
+      { parse_mode: "Markdown" }
+    );
+  });
+
   // ── Callback query handler (for inline buttons) ─────────────
   _bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
@@ -268,6 +362,29 @@ export function initBot(): Bot {
           );
           log.info({ emailId, taskTitle: result.taskTitle }, "Task created from email via button");
         }
+
+      } else if (data.startsWith("pa:")) {
+        // pa = partner accept
+        const domain = data.replace("pa:", "");
+        upsertPartnership(domain, domain);
+        markDomainSuggested(domain);
+        await ctx.answerCallbackQuery({ text: "✅ Partner added!" });
+        await ctx.editMessageText(
+          ctx.callbackQuery.message?.text + `\n\n_✅ Added as partner_`,
+          { parse_mode: "Markdown" }
+        );
+        log.info({ domain }, "Partner accepted via suggestion button");
+
+      } else if (data.startsWith("pd:")) {
+        // pd = partner decline
+        const domain = data.replace("pd:", "");
+        markDomainSuggested(domain);
+        await ctx.answerCallbackQuery({ text: "👌 Skipped" });
+        await ctx.editMessageText(
+          ctx.callbackQuery.message?.text + `\n\n_Skipped — won't ask again_`,
+          { parse_mode: "Markdown" }
+        );
+        log.info({ domain }, "Partner declined via suggestion button");
 
       } else {
         await ctx.answerCallbackQuery({ text: `Unknown action: ${data}` });
@@ -380,6 +497,36 @@ export async function sendNoneNotification(
   } catch (error) {
     log.error({ error }, "Failed to send NONE notification");
     // Don't throw — NONE notifications failing shouldn't crash the cycle
+  }
+}
+
+// ── Send partner suggestion with accept/decline buttons ───────
+
+export async function sendPartnerSuggestion(
+  domain: string,
+  displayName: string,
+  emailCount: number
+): Promise<void> {
+  const config = getConfig();
+  const bot = getBot();
+
+  const text =
+    `🤝 *Partner Suggestion*\n\n` +
+    `I've seen *${emailCount} emails* from \`${domain}\`${displayName !== domain ? ` (${displayName})` : ""}.\n\n` +
+    `Should I track them as a partner? Partners get prioritized in notifications and reply tracking.`;
+
+  const keyboard = new InlineKeyboard()
+    .text("✅ Yes, add partner", `pa:${domain}`)
+    .text("❌ No, skip", `pd:${domain}`);
+
+  try {
+    await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, text, {
+      parse_mode: "Markdown",
+      reply_markup: keyboard,
+    });
+    log.info({ domain, emailCount }, "Partner suggestion sent");
+  } catch (error) {
+    log.error({ error, domain }, "Failed to send partner suggestion");
   }
 }
 
