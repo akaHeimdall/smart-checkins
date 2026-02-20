@@ -5,7 +5,6 @@ import {
   upsertVoiceProfile,
   getAllVoiceProfiles,
   type StyleMode,
-  type VoiceProfile,
 } from "../db";
 import { createChildLogger } from "../logger";
 
