@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard, type Context } from "grammy";
+import { Bot, InlineKeyboard, InputFile, type Context } from "grammy";
 import { getConfig } from "../config";
 import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified, addPrioritySender, removePrioritySender, getAllPrioritySenders, upsertPartnership, getAllPartnerships, getPartnershipByDomain, markDomainSuggested, getDraftCount } from "../db";
 import { analyzeWritingStyle, getStyleSummary, createDraftReply } from "../drafts";
@@ -21,6 +21,7 @@ const HELP_TEXT =
   "/resume — Resume notifications\n\n" +
   "📋 *Info*\n" +
   "/status — System health \\& uptime\n" +
+  "/backup — Download a database backup\n" +
   "/help — Show this message\n\n" +
   "🏢 *Priority Senders*\n" +
   "/priority — List priority senders\n" +
@@ -109,6 +110,31 @@ export function initBot(): Bot {
     _isPaused = false;
     await ctx.reply("▶️ Notifications resumed.");
     log.info("Notifications resumed by user");
+  });
+
+  // ── /backup command ───────────────────────────────────────────
+  _bot.command("backup", async (ctx: Context) => {
+    const dbPath = path.resolve(getConfig().DATABASE_PATH);
+
+    if (!fs.existsSync(dbPath)) {
+      await ctx.reply("❌ Database file not found.");
+      return;
+    }
+
+    try {
+      const stats = fs.statSync(dbPath);
+      const sizeKB = (stats.size / 1024).toFixed(1);
+      const timestamp = new Date().toISOString().slice(0, 10);
+
+      await ctx.replyWithDocument(
+        new InputFile(dbPath, `smart-checkins-backup-${timestamp}.db`),
+        { caption: `📦 Database backup (${sizeKB} KB)\n${new Date().toLocaleString()}` }
+      );
+      log.info({ sizeKB }, "Database backup sent via Telegram");
+    } catch (error) {
+      log.error({ error }, "Failed to send database backup");
+      await ctx.reply("❌ Failed to send backup. Check logs for details.");
+    }
   });
 
   // ── /priority command ─────────────────────────────────────────
