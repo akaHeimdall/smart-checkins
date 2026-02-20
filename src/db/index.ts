@@ -115,6 +115,13 @@ function runMigrations(db: Database.Database): void {
       snooze_until TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS priority_senders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pattern TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL DEFAULT '',
+      added_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_checkin_log_timestamp ON checkin_log(timestamp);
     CREATE INDEX IF NOT EXISTS idx_partnerships_domain ON partnerships(domain);
     CREATE INDEX IF NOT EXISTS idx_snoozed_items_until ON snoozed_items(snooze_until);
@@ -296,6 +303,40 @@ export function getEmailTracking(conversationId: string): EmailTracking | null {
     )
     .get(conversationId) as EmailTracking | undefined;
   return row ?? null;
+}
+
+// ── Priority sender queries ──────────────────────────────────
+
+export interface PrioritySender {
+  id: number;
+  pattern: string;
+  label: string;
+  addedAt: string;
+}
+
+export function addPrioritySender(pattern: string, label: string): void {
+  const db = getDatabase();
+  db.prepare(
+    `INSERT OR IGNORE INTO priority_senders (pattern, label) VALUES (?, ?)`
+  ).run(pattern.toLowerCase(), label);
+}
+
+export function removePrioritySender(pattern: string): boolean {
+  const db = getDatabase();
+  const result = db
+    .prepare(`DELETE FROM priority_senders WHERE pattern = ?`)
+    .run(pattern.toLowerCase());
+  return result.changes > 0;
+}
+
+export function getAllPrioritySenders(): PrioritySender[] {
+  const db = getDatabase();
+  return db
+    .prepare(
+      `SELECT id, pattern, label, added_at as addedAt
+       FROM priority_senders ORDER BY added_at DESC`
+    )
+    .all() as PrioritySender[];
 }
 
 // ── Call log queries ──────────────────────────────────────────────

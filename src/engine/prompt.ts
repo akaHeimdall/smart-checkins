@@ -1,8 +1,9 @@
 import type { CollectedContext, EmailMessage, CalendarEvent, TodoTask } from "../types";
+import { getAllPrioritySenders } from "../db";
 
 // ── System prompt for Claude decision engine ──────────────────────
 
-export const SYSTEM_PROMPT = `You are Smart Check-ins, an AI assistant that monitors a busy professional's Microsoft Outlook email, calendar, and Microsoft To Do tasks. Your job is to evaluate everything happening right now and decide whether the user needs to be notified.
+const SYSTEM_PROMPT_TEMPLATE = `You are Smart Check-ins, an AI assistant that monitors a busy professional's Microsoft Outlook email, calendar, and Microsoft To Do tasks. Your job is to evaluate everything happening right now and decide whether the user needs to be notified.
 
 ## Your Decision Options
 
@@ -54,8 +55,7 @@ Suggest create_task for emails that require follow-up action — especially oppo
 
 Emails from these domains or people are high-priority and should NEVER be classified as NONE. Always surface them as TEXT at minimum (urgency 5+).
 
-**Priority domains:**
-- \`abhms.org\` — American Baptist Home Mission Societies (employer/key org)
+{{PRIORITY_SENDERS}}
 
 **Rules for priority sender emails:**
 1. NEVER classify as NONE. Always TEXT at minimum (urgency 5+).
@@ -89,6 +89,25 @@ Your reasoning is shown to the user in Telegram (in italics below the summary). 
 - Cover: what you looked at, why you made this decision, what you deprioritized
 - 3-6 bullet points total`;
 
+
+// ── Build the system prompt (resolves dynamic priority senders) ───
+
+export function getSystemPrompt(): string {
+  const senders = getAllPrioritySenders();
+
+  let priorityBlock: string;
+  if (senders.length === 0) {
+    priorityBlock = "**Priority senders:** None configured yet. User can add them via /priority in Telegram.";
+  } else {
+    const lines = senders.map((s) => {
+      const label = s.label ? ` — ${s.label}` : "";
+      return `- \`${s.pattern}\`${label}`;
+    });
+    priorityBlock = `**Priority senders:**\n${lines.join("\n")}`;
+  }
+
+  return SYSTEM_PROMPT_TEMPLATE.replace("{{PRIORITY_SENDERS}}", priorityBlock);
+}
 
 // ── Build the user prompt with all collected data ─────────────────
 

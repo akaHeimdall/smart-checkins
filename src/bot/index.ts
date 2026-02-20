@@ -1,6 +1,6 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import { getConfig } from "../config";
-import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified } from "../db";
+import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified, addPrioritySender, removePrioritySender, getAllPrioritySenders } from "../db";
 import { formatStatusMessage, formatDecisionNotification, formatNoneDecision } from "./messages";
 import { shortenId, resolveId, getEmailMeta } from "./callback-store";
 import { createTaskFromEmail } from "../collectors/tasks";
@@ -31,7 +31,8 @@ export function initBot(): Bot {
         "/status \\- System health\n" +
         "/force \\- Run a check\\-in now\n" +
         "/pause \\- Pause notifications\n" +
-        "/resume \\- Resume notifications",
+        "/resume \\- Resume notifications\n" +
+        "/priority \\- Manage priority senders",
       { parse_mode: "MarkdownV2" }
     );
   });
@@ -90,6 +91,100 @@ export function initBot(): Bot {
     _isPaused = false;
     await ctx.reply("▶️ Notifications resumed.");
     log.info("Notifications resumed by user");
+  });
+
+  // ── /priority command ─────────────────────────────────────────
+  _bot.command("priority", async (ctx: Context) => {
+    const text = ctx.message?.text ?? "";
+    const args = text.replace(/^\/priority\s*/, "").trim();
+
+    // No args = list all
+    if (!args) {
+      const senders = getAllPrioritySenders();
+      if (senders.length === 0) {
+        await ctx.reply(
+          "📋 *Priority Senders*\n\nNo priority senders configured\\.\n\n" +
+            "Usage:\n" +
+            "`/priority add user@domain\\.com \\- Optional label`\n" +
+            "`/priority add @domain\\.com \\- Optional label`\n" +
+            "`/priority remove user@domain\\.com`\n" +
+            "`/priority` \\- List all",
+          { parse_mode: "MarkdownV2" }
+        );
+      } else {
+        const list = senders
+          .map((s) => `• \`${s.pattern}\`${s.label ? ` — ${s.label}` : ""}`)
+          .join("\n");
+        await ctx.reply(`📋 *Priority Senders*\n\n${list}`, {
+          parse_mode: "Markdown",
+        });
+      }
+      return;
+    }
+
+    // /priority add <pattern> - <label>
+    if (args.startsWith("add ")) {
+      const rest = args.replace("add ", "").trim();
+      // Split on " - " to separate pattern from label
+      const dashIdx = rest.indexOf(" - ");
+      let pattern: string;
+      let label: string;
+
+      if (dashIdx > -1) {
+        pattern = rest.slice(0, dashIdx).trim();
+        label = rest.slice(dashIdx + 3).trim();
+      } else {
+        pattern = rest;
+        label = "";
+      }
+
+      if (!pattern) {
+        await ctx.reply("❌ Usage: `/priority add user@domain.com - Optional label`", {
+          parse_mode: "Markdown",
+        });
+        return;
+      }
+
+      // Normalize: if just a domain without @, prefix with @
+      if (!pattern.includes("@") && pattern.includes(".")) {
+        pattern = `@${pattern}`;
+      }
+
+      addPrioritySender(pattern, label);
+      await ctx.reply(`✅ Added priority sender: \`${pattern}\`${label ? ` (${label})` : ""}`, {
+        parse_mode: "Markdown",
+      });
+      log.info({ pattern, label }, "Priority sender added via Telegram");
+      return;
+    }
+
+    // /priority remove <pattern>
+    if (args.startsWith("remove ") || args.startsWith("rm ")) {
+      const pattern = args.replace(/^(remove|rm)\s+/, "").trim();
+      if (!pattern) {
+        await ctx.reply("❌ Usage: `/priority remove user@domain.com`", {
+          parse_mode: "Markdown",
+        });
+        return;
+      }
+
+      const removed = removePrioritySender(pattern);
+      if (removed) {
+        await ctx.reply(`🗑 Removed priority sender: \`${pattern}\``, {
+          parse_mode: "Markdown",
+        });
+        log.info({ pattern }, "Priority sender removed via Telegram");
+      } else {
+        await ctx.reply(`❌ Not found: \`${pattern}\``, { parse_mode: "Markdown" });
+      }
+      return;
+    }
+
+    // Unknown subcommand
+    await ctx.reply(
+      "❓ Unknown subcommand. Try:\n`/priority add email@domain.com - Label`\n`/priority remove email@domain.com`\n`/priority` (list all)",
+      { parse_mode: "Markdown" }
+    );
   });
 
   // ── Callback query handler (for inline buttons) ─────────────

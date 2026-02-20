@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getConfig } from "../config";
 import { createChildLogger } from "../logger";
-import { SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
+import { getSystemPrompt, buildUserPrompt } from "./prompt";
 import type { CollectedContext, DecisionResult, Decision } from "../types";
 
 const log = createChildLogger("engine");
@@ -94,7 +94,7 @@ export async function makeDecision(
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1024,
-      system: SYSTEM_PROMPT,
+      system: getSystemPrompt(),
       tools: [EVALUATE_TOOL],
       tool_choice: { type: "tool", name: "evaluate_checkin" },
       messages: [{ role: "user", content: userPrompt }],
