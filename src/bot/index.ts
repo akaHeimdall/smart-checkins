@@ -1,7 +1,8 @@
 import { Bot, InlineKeyboard, InputFile, type Context } from "grammy";
 import { getConfig } from "../config";
-import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified, addPrioritySender, removePrioritySender, getAllPrioritySenders, upsertPartnership, getAllPartnerships, getPartnershipByDomain, markDomainSuggested, getDraftCount } from "../db";
+import { getRecentCheckins, getLastCheckinTimestamp, snoozeItem, markEmailNotified, addPrioritySender, removePrioritySender, getAllPrioritySenders, upsertPartnership, getAllPartnerships, getPartnershipByDomain, markDomainSuggested, getDraftCount, recordBackup, getLastBackupTime } from "../db";
 import { analyzeWritingStyle, getStyleSummary, createDraftReply } from "../drafts";
+import { getNextRunTime } from "../scheduler";
 import { formatStatusMessage, formatDecisionNotification, formatNoneDecision } from "./messages";
 import { shortenId, resolveId, getEmailMeta } from "./callback-store";
 import { createTaskFromEmail } from "../collectors/tasks";
@@ -72,8 +73,11 @@ export function initBot(): Bot {
       dbSize = "Not found";
     }
 
+    const nextRun = getNextRunTime();
+    const lastBackup = getLastBackupTime();
+
     const statusText = formatStatusMessage({
-      lastCycleTime: lastCheckin ?? undefined,
+      lastCycleTime: lastCheckin ? formatDate(lastCheckin) : undefined,
       lastDecision: recent[0]?.decision ?? undefined,
       sourcesStatus: [
         "📧 Outlook Mail — configured",
@@ -81,6 +85,8 @@ export function initBot(): Bot {
         "✅ Microsoft To Do — configured",
         "🤖 Claude AI — active",
       ],
+      nextRun: nextRun ? formatDate(nextRun) : undefined,
+      lastBackup: lastBackup ? formatDate(lastBackup) : "Never",
       uptime,
       dbSize,
     });
@@ -128,8 +134,9 @@ export function initBot(): Bot {
 
       await ctx.replyWithDocument(
         new InputFile(dbPath, `smart-checkins-backup-${timestamp}.db`),
-        { caption: `📦 Database backup (${sizeKB} KB)\n${new Date().toLocaleString()}` }
+        { caption: `📦 Database backup (${sizeKB} KB)\n${formatDate(new Date())}` }
       );
+      recordBackup();
       log.info({ sizeKB }, "Database backup sent via Telegram");
     } catch (error) {
       log.error({ error }, "Failed to send database backup");
@@ -670,6 +677,18 @@ export function setOnForceCheck(callback: () => void): void {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
+
+function formatDate(input: string | Date): string {
+  const date = typeof input === "string" ? new Date(input) : input;
+  return date.toLocaleString("en-US", {
+    month: "long",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
 
 function formatUptime(ms: number): string {
   const seconds = Math.floor(ms / 1000);

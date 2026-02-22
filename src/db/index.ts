@@ -520,6 +520,16 @@ export function getDraftCount(): number {
   return row.count;
 }
 
+// ── Backup tracking (uses memory table) ──────────────────────────
+
+export function recordBackup(): void {
+  setMemory("last_backup", new Date().toISOString(), "system");
+}
+
+export function getLastBackupTime(): string | null {
+  return getMemory("last_backup");
+}
+
 // ── Call log queries ──────────────────────────────────────────────
 
 export function getCallsToday(): number {

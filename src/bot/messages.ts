@@ -152,6 +152,7 @@ export function formatStatusMessage(status: {
   lastDecision?: string;
   sourcesStatus: string[];
   nextRun?: string;
+  lastBackup?: string;
   uptime: string;
   dbSize: string;
 }): string {
@@ -164,6 +165,7 @@ export function formatStatusMessage(status: {
   lines.push(`🕐 Last cycle: ${status.lastCycleTime ?? "None yet"}`);
   lines.push(`📋 Last decision: ${status.lastDecision ?? "N/A"}`);
   lines.push(`⏭ Next run: ${status.nextRun ?? "Unknown"}`);
+  lines.push(`📦 Last backup: ${status.lastBackup ?? "Never"}`);
   lines.push("");
   lines.push("*Data Sources:*");
   for (const source of status.sourcesStatus) {

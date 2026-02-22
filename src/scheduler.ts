@@ -1,4 +1,5 @@
 import cron from "node-cron";
+import { CronExpressionParser } from "cron-parser";
 import { getConfig } from "./config";
 import { collectContext } from "./collectors";
 import { enrichEmails } from "./enrichment";
@@ -200,6 +201,16 @@ export function stopScheduler(): void {
 
 export function getLastCycleResult(): CycleResult | null {
   return _lastCycleResult;
+}
+
+export function getNextRunTime(): Date | null {
+  try {
+    const config = getConfig();
+    const interval = CronExpressionParser.parse(config.CRON_SCHEDULE);
+    return interval.next().toDate();
+  } catch {
+    return null;
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
